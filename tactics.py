@@ -978,18 +978,10 @@ class CustomTacticsEditor:
         font = pygame.font.Font(None, 36)
         small_font = pygame.font.Font(None, 24)
         slot_name = self.editing_slot.capitalize() if self.editing_slot else "Unknown"
-        title = font.render(f"Custom Tactics Editor - {slot_name}", True, WHITE)
-        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 20))
-        screen.blit(title, title_rect)
-        
-        # Selected player indicator
-        if 0 <= self.selected_player < 5:
-            player_text = small_font.render(f"Selected: Player {self.selected_player + 1}", True, YELLOW)
-            screen.blit(player_text, (10, 50))
         
         # Unsaved changes indicator
         if self.check_unsaved_changes():
-            changes_text = small_font.render("● Unsaved changes", True, YELLOW)
+            changes_text = small_font.render("Unsaved changes", True, YELLOW)
             screen.blit(changes_text, (10, 75))
         
         # Draw field background (rotated half-field view)
@@ -1232,8 +1224,7 @@ class CustomTacticsEditor:
                 players_str = ", ".join(map(str, collision_list))
                 warning_lines.append(f"Players {players_str} conflicted in their position")
         
-        # Position text 25% up from center
-        warning_y = SCREEN_HEIGHT // 2 - int(SCREEN_HEIGHT * 0.25)
+        warning_y = SCREEN_HEIGHT // 2 - int(SCREEN_HEIGHT * 0.40)
         
         # Font size reduced by 20% (from 48 to 38)
         font_size = int(25)
