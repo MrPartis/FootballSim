@@ -134,10 +134,18 @@ class GameManager:
         # Flag to start music on first update
         self._music_initialized = False
         
+        # Coin flip system
+        self.coin_flip_active = False
+        self.coin_flip_start_time = 0
+        self.coin_flip_result = random.randint(1, 2)  # 1 or 2 (which team won)
+        self.coin_flip_rotation = 0  # Current rotation angle
+        self.coin_flip_winner_determined = False
+        self.coin_flip_result_display_time = 0  # When to stop showing result
+        
     def update_music(self):
         """Update background music based on current game state."""
         # Determine what music should be playing
-        if self.game_state in [GAME_STATE_MENU, GAME_STATE_TACTICS, GAME_STATE_CUSTOM_TACTICS]:
+        if self.game_state in [GAME_STATE_MENU, GAME_STATE_TACTICS, GAME_STATE_CUSTOM_TACTICS, GAME_STATE_COIN_FLIP]:
             target_music = 'menu'
         elif self.game_state == GAME_STATE_GAME_OVER:
             target_music = self.get_ending_music_type()
@@ -616,6 +624,9 @@ class GameManager:
             return
         elif self.game_state == GAME_STATE_CUSTOM_TACTICS:
             return
+        elif self.game_state == GAME_STATE_COIN_FLIP:
+            self.update_coin_flip()
+            return
             
         # Update goal animation if active
         self.update_goal_animation()
@@ -879,6 +890,13 @@ class GameManager:
             return
         elif self.game_state == GAME_STATE_CUSTOM_TACTICS:
             self.handle_custom_tactics_keypress(key)
+            return
+        elif self.game_state == GAME_STATE_COIN_FLIP:
+            # Skip coin flip animation or result display
+            if self.coin_flip_active:
+                self.complete_coin_flip()
+            elif self.coin_flip_winner_determined:
+                self._actually_start_game()
             return
         
         if self.game_state != GAME_STATE_PLAYING:
@@ -1185,18 +1203,9 @@ class GameManager:
             self._start_game()
     
     def _start_game(self):
-        """Start the actual game with selected tactics"""
-        # Reinitialize players with selected tactics
-        self.init_players()
-        
-        # Set game state to playing
-        self.game_state = GAME_STATE_PLAYING
-        self.update_music()
-        self.current_phase = PHASE_SELECT_PLAYER
-        
-        # Ensure players are reset
-        for p in self.team1_players + self.team2_players:
-            p.reset_turn()
+        """Start the coin flip to determine which team goes first"""
+        # Start coin flip animation
+        self.start_coin_flip()
     
     def handle_custom_tactics_keypress(self, key):
         """Handle keyboard input during custom tactics editing"""
@@ -1701,6 +1710,11 @@ class GameManager:
             elif self._show_unsaved_changes_dialog:
                 self.draw_unsaved_changes_dialog(screen)
             return
+        elif self.game_state == GAME_STATE_COIN_FLIP:
+            # Clear background
+            screen.fill(BLACK)
+            self.draw_coin_flip(screen)
+            return
             
         # Get camera transformation
         zoom, offset_x, offset_y = self.get_camera_transform()
@@ -2178,4 +2192,207 @@ class GameManager:
         instruction_y = dialog_y + dialog_height - 40
         instruction_text = small_font.render("Press any key to continue", True, YELLOW)
         instruction_rect = instruction_text.get_rect(center=(SCREEN_WIDTH // 2, instruction_y))
+        screen.blit(instruction_text, instruction_rect)
+    
+    def start_coin_flip(self):
+        """Start the coin flip animation"""
+        import random
+        
+        # Determine the winner randomly
+        self.coin_flip_result = random.choice([1, 2])
+        
+        # Initialize animation state
+        self.coin_flip_active = True
+        self.coin_flip_start_time = pygame.time.get_ticks()
+        self.coin_flip_rotation = 0
+        self.coin_flip_winner_determined = False
+        self.coin_flip_result_display_time = 0
+        
+        # Set game state to coin flip
+        self.game_state = GAME_STATE_COIN_FLIP
+        self.update_music()
+    
+    def update_coin_flip(self):
+        """Update coin flip animation"""
+        if not self.coin_flip_active and not self.coin_flip_winner_determined:
+            return
+        
+        current_time = pygame.time.get_ticks()
+        
+        if self.coin_flip_active:
+            # Animation phase
+            elapsed = current_time - self.coin_flip_start_time
+            
+            # Update rotation
+            self.coin_flip_rotation += COIN_FLIP_ROTATION_SPEED
+            if self.coin_flip_rotation >= 360:
+                self.coin_flip_rotation = 0
+            
+            # Check if animation should end
+            if elapsed >= COIN_FLIP_DURATION:
+                self.complete_coin_flip()
+        elif self.coin_flip_winner_determined and hasattr(self, 'coin_flip_result_display_time'):
+            # Result display phase
+            if current_time >= self.coin_flip_result_display_time:
+                self._actually_start_game()
+    
+    def complete_coin_flip(self):
+        """Complete the coin flip and start the actual game"""
+        if not self.coin_flip_winner_determined:
+            # First time completing - show result for 2 seconds
+            self.coin_flip_active = False
+            self.coin_flip_winner_determined = True
+            # Add a 2-second delay to show the result
+            self.coin_flip_result_display_time = pygame.time.get_ticks() + 2000  # Show result for 2 seconds
+        else:
+            # Result already shown, now start the game
+            self._actually_start_game()
+    
+    def _actually_start_game(self):
+        """Actually start the game after coin flip"""
+        # Set the winning team to go first
+        self.current_team = self.coin_flip_result
+        
+        # Reinitialize players with selected tactics
+        self.init_players()
+        
+        # Set game state to playing
+        self.game_state = GAME_STATE_PLAYING
+        self.update_music()
+        self.current_phase = PHASE_SELECT_PLAYER
+        
+        # Ensure players are reset
+        for p in self.team1_players + self.team2_players:
+            p.reset_turn()
+        
+        # Set up the turn queue with winning team first
+        self.turn_queue = [self.coin_flip_result, 3 - self.coin_flip_result]  # 3-team gives other team
+        self.queue_index = 0
+        self.teams_played_this_turn.clear()
+    
+    def draw_coin_flip(self, screen):
+        """Draw the coin flip animation"""
+        # Background
+        screen.fill(BLACK)
+        
+        # Title
+        title_font = pygame.font.Font(None, 64)
+        title_text = title_font.render("COIN FLIP", True, WHITE)
+        title_rect = title_text.get_rect(center=(SCREEN_WIDTH // 2, 150))
+        screen.blit(title_text, title_rect)
+        
+        # Subtitle
+        subtitle_font = pygame.font.Font(None, 36)
+        if self.coin_flip_active:
+            subtitle_text = subtitle_font.render("Determining who goes first...", True, LIGHT_GRAY)
+        else:
+            subtitle_text = subtitle_font.render("Result:", True, LIGHT_GRAY)
+        subtitle_rect = subtitle_text.get_rect(center=(SCREEN_WIDTH // 2, 200))
+        screen.blit(subtitle_text, subtitle_rect)
+        
+        # Draw coin
+        coin_center_x = SCREEN_WIDTH // 2
+        coin_center_y = SCREEN_HEIGHT // 2 - 50  # Moved up to make room for text
+        
+        if self.coin_flip_active:
+            # Animate the coin flipping
+            # Use sine wave to create a flipping effect
+            flip_scale = abs(math.sin(math.radians(self.coin_flip_rotation * 4)))
+            current_coin_width = int(COIN_SIZE * flip_scale)
+            
+            # Determine which side to show based on rotation
+            show_heads = (self.coin_flip_rotation % 180) < 90
+            
+            # Draw coin shadow
+            shadow_offset = 5
+            pygame.draw.ellipse(screen, GRAY, 
+                              (coin_center_x - current_coin_width//2 + shadow_offset, 
+                               coin_center_y - COIN_SIZE//2 + shadow_offset, 
+                               current_coin_width, COIN_SIZE))
+            
+            # Draw coin
+            if show_heads:
+                # Heads - Team 1 color (Blue)
+                pygame.draw.ellipse(screen, TEAM1_COLOR, 
+                                  (coin_center_x - current_coin_width//2, 
+                                   coin_center_y - COIN_SIZE//2, 
+                                   current_coin_width, COIN_SIZE))
+                pygame.draw.ellipse(screen, WHITE, 
+                                  (coin_center_x - current_coin_width//2, 
+                                   coin_center_y - COIN_SIZE//2, 
+                                   current_coin_width, COIN_SIZE), 3)
+                
+                # Draw "1" in center
+                if current_coin_width > 20:  # Only draw if coin is wide enough
+                    coin_font = pygame.font.Font(None, int(48 * flip_scale))
+                    coin_text = coin_font.render("1", True, WHITE)
+                    coin_text_rect = coin_text.get_rect(center=(coin_center_x, coin_center_y))
+                    screen.blit(coin_text, coin_text_rect)
+            else:
+                # Tails - Team 2 color (Red)
+                pygame.draw.ellipse(screen, TEAM2_COLOR, 
+                                  (coin_center_x - current_coin_width//2, 
+                                   coin_center_y - COIN_SIZE//2, 
+                                   current_coin_width, COIN_SIZE))
+                pygame.draw.ellipse(screen, WHITE, 
+                                  (coin_center_x - current_coin_width//2, 
+                                   coin_center_y - COIN_SIZE//2, 
+                                   current_coin_width, COIN_SIZE), 3)
+                
+                # Draw "2" in center
+                if current_coin_width > 20:  # Only draw if coin is wide enough
+                    coin_font = pygame.font.Font(None, int(48 * flip_scale))
+                    coin_text = coin_font.render("2", True, WHITE)
+                    coin_text_rect = coin_text.get_rect(center=(coin_center_x, coin_center_y))
+                    screen.blit(coin_text, coin_text_rect)
+        else:
+            # Show final result - paused for 2 seconds
+            winner_color = TEAM1_COLOR if self.coin_flip_result == 1 else TEAM2_COLOR
+            
+            # Draw coin shadow
+            shadow_offset = 5
+            pygame.draw.ellipse(screen, GRAY, 
+                              (coin_center_x - COIN_SIZE//2 + shadow_offset, 
+                               coin_center_y - COIN_SIZE//2 + shadow_offset, 
+                               COIN_SIZE, COIN_SIZE))
+            
+            # Draw final coin
+            pygame.draw.ellipse(screen, winner_color, 
+                              (coin_center_x - COIN_SIZE//2, 
+                               coin_center_y - COIN_SIZE//2, 
+                               COIN_SIZE, COIN_SIZE))
+            pygame.draw.ellipse(screen, WHITE, 
+                              (coin_center_x - COIN_SIZE//2, 
+                               coin_center_y - COIN_SIZE//2, 
+                               COIN_SIZE, COIN_SIZE), 4)  # Thicker border for final result
+            
+            # Draw winning team number
+            coin_font = pygame.font.Font(None, 60)  # Larger font for final result
+            coin_text = coin_font.render(str(self.coin_flip_result), True, WHITE)
+            coin_text_rect = coin_text.get_rect(center=(coin_center_x, coin_center_y))
+            screen.blit(coin_text, coin_text_rect)
+            
+            # Show result text in team color
+            result_font = pygame.font.Font(None, 52)  # Larger and more prominent
+            result_text = result_font.render(f"Team {self.coin_flip_result} goes first!", True, winner_color)
+            result_rect = result_text.get_rect(center=(SCREEN_WIDTH // 2, coin_center_y + 120))
+            screen.blit(result_text, result_rect)
+            
+            # Add a subtle glow effect around the result text
+            glow_font = pygame.font.Font(None, 54)
+            for offset in [(2, 2), (-2, -2), (2, -2), (-2, 2)]:
+                glow_text = glow_font.render(f"Team {self.coin_flip_result} goes first!", True, (winner_color[0]//3, winner_color[1]//3, winner_color[2]//3))
+                glow_rect = glow_text.get_rect(center=(SCREEN_WIDTH // 2 + offset[0], coin_center_y + 120 + offset[1]))
+                screen.blit(glow_text, glow_rect)
+            
+            # Redraw the main text on top
+            screen.blit(result_text, result_rect)
+        
+        # Instructions
+        instruction_font = pygame.font.Font(None, 24)
+        if self.coin_flip_active:
+            instruction_text = instruction_font.render("Press any key to skip animation", True, LIGHT_GRAY)
+        else:
+            instruction_text = instruction_font.render("Match starting soon", True, WHITE)
+        instruction_rect = instruction_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50))
         screen.blit(instruction_text, instruction_rect)

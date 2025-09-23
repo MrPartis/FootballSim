@@ -98,6 +98,12 @@ class MiniFootballGame:
                             pass
                         self.game_manager.game_state = GAME_STATE_PLAYING
                         self.game_manager.update_music()
+                    elif self.game_manager.game_state == GAME_STATE_COIN_FLIP:
+                        # Skip coin flip animation or result display
+                        if self.game_manager.coin_flip_active:
+                            self.game_manager.complete_coin_flip()
+                        elif self.game_manager.coin_flip_winner_determined:
+                            self.game_manager._actually_start_game()
                     else:
                         # For other states (MENU, TACTICS, CUSTOM_TACTICS), let game manager handle ESC
                         self.game_manager.handle_keypress(event.key)
@@ -111,7 +117,14 @@ class MiniFootballGame:
                 
                 # Game-specific controls
                 else:
-                    self.game_manager.handle_keypress(event.key)
+                    # During coin flip, any key skips the animation or result display
+                    if self.game_manager.game_state == GAME_STATE_COIN_FLIP:
+                        if self.game_manager.coin_flip_active:
+                            self.game_manager.complete_coin_flip()
+                        elif self.game_manager.coin_flip_winner_determined:
+                            self.game_manager._actually_start_game()
+                    else:
+                        self.game_manager.handle_keypress(event.key)
             
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 # Handle mouse events for custom tactics editor
@@ -138,9 +151,10 @@ class MiniFootballGame:
             self.game_manager.update_music()
             self.game_manager._music_initialized = True
             
-        if self.game_manager.game_state == GAME_STATE_PLAYING:
-            self.game_manager.update()
-        elif self.game_manager.game_state == GAME_STATE_PAUSED:
+        # Always update the game manager (it handles state internally)
+        self.game_manager.update()
+        
+        if self.game_manager.game_state == GAME_STATE_PAUSED:
             # Ensure pause audio keeps playing
             self.game_manager.sounds.ensure_pause_audio_playing()
     

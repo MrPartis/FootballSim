@@ -104,11 +104,12 @@ P2_CONTROLS = {
 # Game states
 GAME_STATE_MENU = 0
 GAME_STATE_TACTICS = 1
-GAME_STATE_PLAYING = 2
-GAME_STATE_FORCE_SELECT = 3
-GAME_STATE_PAUSED = 4
-GAME_STATE_GAME_OVER = 5
-GAME_STATE_CUSTOM_TACTICS = 6
+GAME_STATE_COIN_FLIP = 2
+GAME_STATE_PLAYING = 3
+GAME_STATE_FORCE_SELECT = 4
+GAME_STATE_PAUSED = 5
+GAME_STATE_GAME_OVER = 6
+GAME_STATE_CUSTOM_TACTICS = 7
 
 # Turn phases
 PHASE_SELECT_PLAYER = 0
@@ -188,3 +189,9 @@ KICK_RANGE_BONUS = 20  # Doubled from 10 for larger player/ball sizes
 
 # Cinematic animation settings
 GOAL_ZOOM_SLOW_MOTION_SPEED = 0.3  # Speed multiplier during goal zoom animation (0.3x = 30% normal speed)
+
+# Coin flip animation settings
+COIN_FLIP_DURATION = 1000  # Total animation duration in ms
+COIN_FLIP_ROTATION_SPEED = 10  # Rotation speed (degrees per frame)
+COIN_SIZE = 100  # Coin radius in pixels
+COIN_FLIPS = 9  # Number of visual flips during animation
