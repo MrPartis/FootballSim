@@ -217,16 +217,7 @@ DEFAULT_BGM_VOLUME = 1.00     # Background music volume (0.0 to 1.0)
 
 # Custom tactics configuration (saved/loaded via config_manager.py)
 DEFAULT_CUSTOM_TACTICS = {
-    'custom1': {
-        'name': 'Custom Tactics #1',
-        'positions': [
-        (110.0, 335.0),
-        (275.0, 167.5),
-        (275.0, 502.5),
-        (440.0, 234.49999999999997),
-        (440.0, 435.5),
-    ]
-    },
+    'custom1': None,
     'custom2': None,
     'custom3': None,
     'custom4': None,
