@@ -1720,7 +1720,7 @@ class GameManager:
         # Show turn number and team, with turn limit if applicable
         if self.game_mode in ['turns_only', 'both']:
             turn_segments = [
-            (f"Turn: {self.turn_number}/{self.max_turns_limit} | ", WHITE),
+            (f"Turn: {min(self.turn_number, self.max_turns_limit)}/{self.max_turns_limit} | ", WHITE),
             (f"Team {self.current_team}'s turn", WHITE)
             ]
         else:
