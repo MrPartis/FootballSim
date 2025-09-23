@@ -33,4 +33,3 @@ echo.
 echo You can distribute the MiniFootball.exe file to run the game on any Windows computer
 echo without needing Python installed.
 echo.
-pause

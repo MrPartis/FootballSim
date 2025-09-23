@@ -81,29 +81,33 @@ class MiniFootballGame:
                 if event.key == pygame.K_ESCAPE:
                     if self.game_manager.game_state == GAME_STATE_GAME_OVER:
                         self.running = False
+                    elif self.game_manager.game_state == GAME_STATE_PLAYING:
+                        # Toggle pause - Play pause SFX (if available) and start looping pause audio
+                        try:
+                            self.game_manager.sounds.play_pause()
+                            self.game_manager.sounds.start_pause_audio()
+                        except Exception:
+                            pass
+                        self.game_manager.game_state = GAME_STATE_PAUSED
+                        self.game_manager.update_music()
+                    elif self.game_manager.game_state == GAME_STATE_PAUSED:
+                        # Resume game - Stop pause audio and resume game
+                        try:
+                            self.game_manager.sounds.stop_pause_audio()
+                        except Exception:
+                            pass
+                        self.game_manager.game_state = GAME_STATE_PLAYING
+                        self.game_manager.update_music()
                     else:
-                        # Toggle pause
-                        if self.game_manager.game_state == GAME_STATE_PLAYING:
-                            # Play pause SFX (if available) and start looping pause audio
-                            try:
-                                self.game_manager.sounds.play_pause()
-                                self.game_manager.sounds.start_pause_audio()
-                            except Exception:
-                                pass
-                            self.game_manager.game_state = GAME_STATE_PAUSED
-                            self.game_manager.update_music()
-                        elif self.game_manager.game_state == GAME_STATE_PAUSED:
-                            # Stop pause audio and resume game
-                            try:
-                                self.game_manager.sounds.stop_pause_audio()
-                            except Exception:
-                                pass
-                            self.game_manager.game_state = GAME_STATE_PLAYING
-                            self.game_manager.update_music()
+                        # For other states (MENU, TACTICS, CUSTOM_TACTICS), let game manager handle ESC
+                        self.game_manager.handle_keypress(event.key)
                 
                 elif event.key == pygame.K_r:
                     if self.game_manager.game_state == GAME_STATE_GAME_OVER:
                         self.game_manager.restart_game()
+                    else:
+                        # For other states, let game manager handle R key
+                        self.game_manager.handle_keypress(event.key)
                 
                 # Game-specific controls
                 else:

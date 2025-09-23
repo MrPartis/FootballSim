@@ -26,10 +26,18 @@ A turn-based football (soccer) simulation game built with Python and Pygame. Con
 - **Player Selection**: Numpad 1-5
 - **Action/Kick**: Enter
 
+### Menu & Tactics Screen Controls
+- **Navigate**: Arrow keys or WASD
+- **Select**: Enter or Spacebar
+- **Back to Menu**: ESC
+- **Customize Tactic**: C (on custom tactics)
+- **Delete Tactic**: X (on custom tactics)
+- **Reset All Tactics**: R
+
 ### Global Controls
-- **Pause/Resume**: ESC
+- **Pause/Resume**: ESC (during gameplay)
 - **Restart Game**: R (when game is over)
-- **Quit**: ESC (when game is over)
+- **Quit**: ESC (when game is over) or close window
 
 ## Installation
 
