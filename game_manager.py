@@ -154,7 +154,7 @@ class GameManager:
         # Coin flip system
         self.coin_flip_active = False
         self.coin_flip_start_time = 0
-        self.coin_flip_result = random.randint(1, 2)  # 1 or 2 (which team won)
+        self.coin_flip_result = random.randint(1, 2)  # Default value, will be properly randomized when coin flip starts
         self.coin_flip_rotation = 0  # Current rotation angle
         self.coin_flip_winner_determined = False
         self.coin_flip_result_display_time = 0  # When to stop showing result
@@ -1839,7 +1839,7 @@ class GameManager:
             return 'end_2p'
     
     def restart_game(self):
-        """Restart the game while preserving user configuration settings"""
+        """Restart the game while preserving user configuration settings and starting from coin flip"""
         # Save current configuration settings
         saved_config = {
             'singleplayer': self.singleplayer,
@@ -1847,7 +1847,9 @@ class GameManager:
             'bot_difficulty': self.bot_difficulty,
             'game_mode': self.game_mode,
             'max_goals': self.max_goals,
-            'max_turns_limit': self.max_turns_limit
+            'max_turns_limit': self.max_turns_limit,
+            'team1_tactic': self.tactics_manager.get_team_tactic(1),
+            'team2_tactic': self.tactics_manager.get_team_tactic(2)
         }
         
         # Reset game state
@@ -1861,12 +1863,19 @@ class GameManager:
         self.max_goals = saved_config['max_goals']
         self.max_turns_limit = saved_config['max_turns_limit']
         
+        # Restore team tactics
+        self.tactics_manager.set_team_tactic(1, saved_config['team1_tactic'])
+        self.tactics_manager.set_team_tactic(2, saved_config['team2_tactic'])
+        
         # Update dependent settings
         self.max_turns = self.max_turns_limit
         self._bot_action_cooldown_ms = BOT_THINK_MS.get(self.bot_difficulty, self._bot_action_cooldown_ms)
         
+        # Start directly from coin flip phase (skip menu and tactics selection)
+        self._start_game()
+        
         # Note: _music_initialized is set to False in __init__, 
-        # so music will start on the next update() call
+        # music will be updated by start_coin_flip() call
     
     def return_to_menu_with_config(self):
         """Return to menu while preserving user configuration settings"""
@@ -1877,7 +1886,9 @@ class GameManager:
             'bot_difficulty': self.bot_difficulty,
             'game_mode': self.game_mode,
             'max_goals': self.max_goals,
-            'max_turns_limit': self.max_turns_limit
+            'max_turns_limit': self.max_turns_limit,
+            'team1_tactic': self.tactics_manager.get_team_tactic(1),
+            'team2_tactic': self.tactics_manager.get_team_tactic(2)
         }
         
         # Reset game state
@@ -1890,6 +1901,10 @@ class GameManager:
         self.game_mode = saved_config['game_mode']
         self.max_goals = saved_config['max_goals']
         self.max_turns_limit = saved_config['max_turns_limit']
+        
+        # Restore team tactics
+        self.tactics_manager.set_team_tactic(1, saved_config['team1_tactic'])
+        self.tactics_manager.set_team_tactic(2, saved_config['team2_tactic'])
         
         # Update dependent settings
         self.max_turns = self.max_turns_limit
@@ -2476,15 +2491,34 @@ class GameManager:
         screen.blit(instruction_text, instruction_rect)
     
     def start_coin_flip(self):
-        """Start the coin flip animation"""
+        """Start the coin flip animation with enhanced randomness"""
         import random
+        import time
         
-        # Determine the winner randomly
-        self.coin_flip_result = random.choice([1, 2])
+        # Use multiple entropy sources for better randomness
+        current_time = pygame.time.get_ticks()
+        system_time = time.time()
+        
+        # Combine multiple random sources to ensure divergent results
+        # Use current game time, system time, and random state for maximum entropy
+        random.seed(int(current_time * system_time) % 1000000)
+        
+        # Generate random result with additional entropy from timing
+        base_random = random.randint(1, 2)
+        time_entropy = int((current_time + system_time * 1000) % 10)
+        
+        # Use both random choice and time-based entropy for final decision
+        if time_entropy % 2 == 0:
+            self.coin_flip_result = base_random
+        else:
+            self.coin_flip_result = 3 - base_random  # Flip the result (1->2, 2->1)
+        
+        # Reset random state to avoid affecting other game randomness
+        random.seed(None)
         
         # Initialize animation state
         self.coin_flip_active = True
-        self.coin_flip_start_time = pygame.time.get_ticks()
+        self.coin_flip_start_time = current_time
         self.coin_flip_rotation = 0
         self.coin_flip_winner_determined = False
         self.coin_flip_result_display_time = 0
