@@ -1,0 +1,19 @@
+{
+  "audio": {
+    "master_volume": 1.0,
+    "sfx_volume": 1.0,
+    "bgm_volume": 1.0
+  },
+  "custom_tactics": {
+    "custom1": null,
+    "custom2": null,
+    "custom3": null,
+    "custom4": null,
+    "custom5": null,
+    "custom6": null
+  },
+  "game_settings": {
+    "difficulty": "medium",
+    "singleplayer": true
+  }
+}

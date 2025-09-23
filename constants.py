@@ -210,14 +210,23 @@ SOUND_FILES = {
     "pause_audio": ["pause_audio.mp3", "pause_audio.wav", "pause_audio.ogg"]
 }
 
-# Default audio configuration (automatically saved and loaded)
+# Default audio configuration (saved/loaded via config_manager.py)
 DEFAULT_MASTER_VOLUME = 1.00  # Master volume (0.0 to 1.0)
 DEFAULT_SFX_VOLUME = 1.00     # Sound effects volume (0.0 to 1.0)
 DEFAULT_BGM_VOLUME = 1.00     # Background music volume (0.0 to 1.0)
 
-# Custom tactics configuration (automatically saved and loaded)
+# Custom tactics configuration (saved/loaded via config_manager.py)
 DEFAULT_CUSTOM_TACTICS = {
-    'custom1': None,
+    'custom1': {
+        'name': 'Custom Tactics #1',
+        'positions': [
+        (110.0, 335.0),
+        (275.0, 167.5),
+        (275.0, 502.5),
+        (440.0, 234.49999999999997),
+        (440.0, 435.5),
+    ]
+    },
     'custom2': None,
     'custom3': None,
     'custom4': None,

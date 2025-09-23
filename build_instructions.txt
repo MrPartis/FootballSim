@@ -1,21 +1,55 @@
-# Mini Football Game - PyInstaller Build Script
+# Mini Football Game - Enhanced PyInstaller Build Script
 # This script creates a standalone executable for the Mini Football game
 
+# Prerequisites:
+# 1. Install all dependencies: pip install -r requirements.txt
+# 2. Install PyInstaller: pip install pyinstaller
+
 # To build the executable:
-# 1. Install PyInstaller: pip install pyinstaller
-# 2. Run this command in the project directory:
+# Option 1 - Use the automated build script (RECOMMENDED):
+build.bat
 
-pyinstaller --onefile --windowed --name="MiniFootball" --icon=assets/icon.ico --add-data="assets;assets" main.py
-
-# Alternative command if you don't have an icon:
-# pyinstaller --onefile --windowed --name="MiniFootball" --add-data="assets;assets" main.py
+# Option 2 - Manual build command:
+pyinstaller --onefile --windowed --name="MiniFootball" \
+    --add-data="assets;assets" \
+    --hidden-import="pygame" \
+    --hidden-import="pygame.mixer" \
+    --hidden-import="pygame.font" \
+    --hidden-import="pygame.image" \
+    --hidden-import="PIL" \
+    --hidden-import="PIL.Image" \
+    --collect-all="pygame" \
+    --collect-submodules="PIL" \
+    --exclude-module="tkinter" \
+    --exclude-module="matplotlib" \
+    --exclude-module="numpy" \
+    --noupx \
+    main.py
 
 # Command breakdown:
-# --onefile      : Creates a single executable file instead of a folder
-# --windowed     : Hides the console window (remove if you want to see debug output)
-# --name         : Name of the executable file
-# --icon         : Icon for the executable (optional)
-# --add-data     : Include the assets folder and its contents
-# main.py        : Entry point script
+# --onefile              : Creates a single executable file
+# --windowed             : Hides the console window
+# --name                 : Name of the executable file
+# --add-data             : Include the assets folder
+# --hidden-import        : Force include modules that might be missed
+# --collect-all          : Include all pygame submodules
+# --collect-submodules   : Include all PIL submodules
+# --exclude-module       : Exclude unnecessary modules to reduce size
+# --noupx               : Disable UPX compression (more reliable)
+
+# Enhanced Features:
+# - Automatic cleanup of previous builds
+# - Better error handling and diagnostics
+# - Hidden imports for Pygame and PIL dependencies
+# - Exclusion of unnecessary modules for smaller size
+# - Basic executable testing
+
+# Troubleshooting:
+# If the build fails:
+# 1. Remove --windowed flag to see console errors
+# 2. Check that all files in requirements.txt are installed
+# 3. Ensure assets folder exists with all required files
+# 4. Try building without --onefile first for debugging
 
 # The executable will be created in the 'dist' folder
+# First run may be slower as Windows extracts embedded files

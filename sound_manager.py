@@ -1,12 +1,14 @@
 import io
 import math
 import struct
+import sys
 import time
 from typing import Optional
 
 import pygame
 import os
 from constants import SOUND_DIR_NAME, SOUND_FILES
+from resource_manager import get_asset_path, get_resource_path
 
 
 class SoundManager:
@@ -239,38 +241,31 @@ class SoundManager:
                 self._pause_audio_channel = None
 
     def _try_load_external(self, key: str) -> Optional[pygame.mixer.Sound]:
-        """Attempt to load a sound from the music folder with several name candidates."""
+        """Attempt to load a sound from the assets folder."""
         if not self.enabled:
             return None
         candidates = SOUND_FILES.get(key, [])
-        # Search in multiple likely roots: current working dir, script dir
-        roots = [os.getcwd(), os.path.dirname(__file__), os.path.dirname(os.path.abspath(__file__))]
-        for root in roots:
-            music_dir = os.path.join(os.path.dirname(root), SOUND_DIR_NAME)
-            # Also try sibling and same-level music dir
-            for base in [music_dir, os.path.join(root, SOUND_DIR_NAME)]:
-                for name in candidates:
-                    path = os.path.join(base, name)
-                    if os.path.isfile(path):
-                        try:
-                            return pygame.mixer.Sound(path)
-                        except Exception:
-                            continue
+        
+        for name in candidates:
+            try:
+                sound_path = get_asset_path(name)
+                if os.path.isfile(sound_path):
+                    return pygame.mixer.Sound(sound_path)
+            except Exception:
+                continue
         return None
 
     def _try_load_music_file(self, filename: str) -> Optional[str]:
         """Try to find a music file and return its path, or None if not found."""
         if not self.enabled:
             return None
-        # Search in multiple likely roots: current working dir, script dir
-        roots = [os.getcwd(), os.path.dirname(__file__), os.path.dirname(os.path.abspath(__file__))]
-        for root in roots:
-            music_dir = os.path.join(os.path.dirname(root), SOUND_DIR_NAME)
-            # Also try sibling and same-level music dir
-            for base in [music_dir, os.path.join(root, SOUND_DIR_NAME)]:
-                path = os.path.join(base, filename)
-                if os.path.isfile(path):
-                    return path
+        
+        try:
+            music_path = get_asset_path(filename)
+            if os.path.isfile(music_path):
+                return music_path
+        except Exception:
+            pass
         return None
 
     def play_menu_music(self):

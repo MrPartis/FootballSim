@@ -5,6 +5,7 @@ Manages player formations and tactical setups
 import pygame
 import math
 from constants import *
+from config_manager import get_custom_tactics, set_custom_tactics
 
 class TacticsManager:
     def __init__(self):
@@ -52,8 +53,12 @@ class TacticsManager:
             }
         }
         
-        # Custom tactics slots (loaded from constants.py)
-        self.custom_tactics = DEFAULT_CUSTOM_TACTICS.copy()  # Load from constants
+        # Custom tactics slots (loaded from config manager)
+        self.custom_tactics = get_custom_tactics()
+        if not self.custom_tactics:
+            # Initialize with defaults if empty
+            self.custom_tactics = DEFAULT_CUSTOM_TACTICS.copy()
+            set_custom_tactics(self.custom_tactics)  # Load from constants
         
         # Currently selected tactics
         self.team1_selected_tactic = 'balanced'  # Default
@@ -177,55 +182,14 @@ class TacticsManager:
             'positions': positions.copy()
         }
         
-        # Save custom tactics to constants.py for persistence
-        self.save_custom_tactics_to_constants()
+        # Save to config manager for persistence
+        set_custom_tactics(self.custom_tactics)
         return True
     
-    def save_custom_tactics_to_constants(self):
-        """Save current custom tactics to constants.py for persistence"""
+    def save_custom_tactics_to_config(self):
+        """Save current custom tactics to config manager for persistence"""
         try:
-            # Read the current constants.py file
-            with open('constants.py', 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            # Convert custom tactics to string representation
-            import re
-            
-            # Create the tactics dictionary string
-            tactics_str = "DEFAULT_CUSTOM_TACTICS = {\n"
-            for key, tactic in self.custom_tactics.items():
-                if tactic is None:
-                    tactics_str += f"    '{key}': None,\n"
-                else:
-                    # Format positions as tuples
-                    positions_str = "[\n"
-                    for pos in tactic['positions']:
-                        positions_str += f"        {pos},\n"
-                    positions_str += "    ]"
-                    
-                    tactics_str += f"    '{key}': {{\n"
-                    tactics_str += f"        'name': '{tactic['name']}',\n"
-                    tactics_str += f"        'positions': {positions_str}\n"
-                    tactics_str += f"    }},\n"
-            tactics_str += "}"
-            
-            # Replace the DEFAULT_CUSTOM_TACTICS section using a more robust pattern
-            # Pattern matches from 'DEFAULT_CUSTOM_TACTICS = {' to the matching closing '}'
-            pattern = r'DEFAULT_CUSTOM_TACTICS\s*=\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
-            if re.search(pattern, content, flags=re.DOTALL):
-                content = re.sub(pattern, tactics_str, content, flags=re.DOTALL)
-            else:
-                # If pattern not found, append to the end before other constants
-                insertion_point = content.find('\n# Corner/unstuck mechanics')
-                if insertion_point != -1:
-                    content = content[:insertion_point] + '\n' + tactics_str + '\n' + content[insertion_point:]
-                else:
-                    content += '\n\n' + tactics_str
-            
-            # Write the updated content back
-            with open('constants.py', 'w', encoding='utf-8') as f:
-                f.write(content)
-            
+            set_custom_tactics(self.custom_tactics)
         except Exception as e:
             print(f"Failed to save custom tactics: {e}")
     
@@ -234,8 +198,8 @@ class TacticsManager:
         for slot in ['custom1', 'custom2', 'custom3', 'custom4', 'custom5', 'custom6']:
             self.custom_tactics[slot] = None
         
-        # Save changes to constants.py for persistence
-        self.save_custom_tactics_to_constants()
+        # Save changes to config for persistence
+        self.save_custom_tactics_to_config()
         return True
     
     def delete_custom_tactic(self, slot_key):
@@ -249,14 +213,18 @@ class TacticsManager:
         # Clear the slot
         self.custom_tactics[slot_key] = None
         
-        # Save changes to constants.py for persistence
-        self.save_custom_tactics_to_constants()
+        # Save changes to config for persistence
+        self.save_custom_tactics_to_config()
         return True
     
     def load_custom_tactics(self):
-        """Load custom tactics from constants.py"""
-        # Ensure we have the latest data from constants.py
-        self.custom_tactics = DEFAULT_CUSTOM_TACTICS.copy()
+        """Load custom tactics from config manager"""
+        # Ensure we have the latest data from config
+        self.custom_tactics = get_custom_tactics()
+        if not self.custom_tactics:
+            # Initialize with defaults if empty
+            self.custom_tactics = DEFAULT_CUSTOM_TACTICS.copy()
+            set_custom_tactics(self.custom_tactics)
         
         # Deep copy any non-None tactics to avoid reference issues
         for key, tactic in self.custom_tactics.items():
@@ -484,9 +452,9 @@ class TacticsManager:
                 self.custom_tactics[invalid['key']] = None
                 removed_count += 1
         
-        # Save changes to constants.py for persistence
+        # Save changes to config for persistence
         if removed_count > 0:
-            self.save_custom_tactics_to_constants()
+            self.save_custom_tactics_to_config()
         
         return removed_count
     

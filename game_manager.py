@@ -1,6 +1,8 @@
 import pygame
 import math
 import random
+import sys
+import os
 from constants import *
 from player import Player
 from ball import Ball
@@ -8,6 +10,8 @@ from physics_utils import resolve_circle_circle
 from field import Field
 from sound_manager import SoundManager
 from tactics import TacticsManager, CustomTacticsEditor
+from resource_manager import get_asset_path
+from config_manager import get_audio_config, set_audio_config
 
 class GameManager:
     def __init__(self):
@@ -45,14 +49,15 @@ class GameManager:
         self.max_goals = 5  # First to reach this many goals wins (1-50)
         self.max_turns_limit = 50  # Game ends after this many turns (10-200)
         
-        # Volume configuration (0.0 to 1.0) - load from constants
-        self.master_volume = DEFAULT_MASTER_VOLUME
-        self.sfx_volume = DEFAULT_SFX_VOLUME
-        self.bgm_volume = DEFAULT_BGM_VOLUME
+        # Volume configuration (0.0 to 1.0) - load from config manager
+        audio_config = get_audio_config()
+        self.master_volume = audio_config.get('master_volume', DEFAULT_MASTER_VOLUME)
+        self.sfx_volume = audio_config.get('sfx_volume', DEFAULT_SFX_VOLUME)
+        self.bgm_volume = audio_config.get('bgm_volume', DEFAULT_BGM_VOLUME)
         
         # Load background image and create gradient surface
         try:
-            self.bg_image = pygame.image.load("assets/bg.png")
+            self.bg_image = pygame.image.load(get_asset_path("bg.png"))
             self.bg_image = pygame.transform.scale(self.bg_image, (SCREEN_WIDTH, SCREEN_HEIGHT))
         except pygame.error:
             self.bg_image = None
@@ -1941,17 +1946,23 @@ class GameManager:
 
     def _calculate_defensive_pressure(self):
         """Calculate how much defensive pressure bot should apply."""
-        ctx = self._bot_context() if hasattr(self, '_bot_context') else {}
+        # Avoid circular dependency with _bot_context
         threat = self._assess_threat_level()
         
         pressure = threat * 0.5
         
-        # Increase pressure when leading and in endgame
-        if ctx.get('leading', False) and ctx.get('endgame', False):
+        # Increase pressure when leading and in endgame based on direct calculation
+        score_diff = self.team1_score - self.team2_score
+        turns_left = max(0, self.max_turns - self.turn_number)
+        endgame = turns_left <= 10
+        leading = score_diff > 0
+        trailing = score_diff < 0
+        
+        if leading and endgame:
             pressure += 0.3
         
         # Decrease pressure when trailing (more aggressive)
-        if ctx.get('trailing', False):
+        if trailing:
             pressure *= 0.7
         
         return min(1.0, pressure)
@@ -2198,39 +2209,11 @@ class GameManager:
         # music will be updated by start_coin_flip() call
     
     def save_audio_configuration(self):
-        """Save current audio settings to constants.py for persistence"""
+        """Save current audio settings to config manager for persistence"""
         try:
-            # Read the current constants.py file
-            with open('constants.py', 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            # Update the audio configuration values
-            import re
-            
-            # Replace DEFAULT_MASTER_VOLUME
-            content = re.sub(
-                r'DEFAULT_MASTER_VOLUME = [0-9.]+',
-                f'DEFAULT_MASTER_VOLUME = {self.master_volume:.2f}',
-                content
-            )
-            
-            # Replace DEFAULT_SFX_VOLUME
-            content = re.sub(
-                r'DEFAULT_SFX_VOLUME = [0-9.]+',
-                f'DEFAULT_SFX_VOLUME = {self.sfx_volume:.2f}',
-                content
-            )
-            
-            # Replace DEFAULT_BGM_VOLUME
-            content = re.sub(
-                r'DEFAULT_BGM_VOLUME = [0-9.]+',
-                f'DEFAULT_BGM_VOLUME = {self.bgm_volume:.2f}',
-                content
-            )
-            
-            # Write the updated content back
-            with open('constants.py', 'w', encoding='utf-8') as f:
-                f.write(content)   
+            set_audio_config('master_volume', self.master_volume)
+            set_audio_config('sfx_volume', self.sfx_volume)
+            set_audio_config('bgm_volume', self.bgm_volume)
         except Exception as e:
             print(f"Failed to save audio configuration: {e}")
 

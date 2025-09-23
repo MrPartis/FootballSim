@@ -7,6 +7,7 @@ except Exception:
     Image = None
 from constants import *
 from game_manager import GameManager
+from resource_manager import get_resource_path, get_asset_path
 
 class MiniFootballGame:
     def __init__(self):
@@ -42,15 +43,11 @@ class MiniFootballGame:
 
     def _load_pause_animation(self):
         """Load animated GIF for pause screen with memory optimizations.
-        Looks for assets/pause.gif or pause.gif. If PIL isn't available or file missing,
+        Looks for pause.gif in assets folder. If PIL isn't available or file missing,
         falls back to no animation (text-only overlay).
         """
-        candidates = [
-            os.path.join(os.path.dirname(__file__), 'assets', 'pause.gif'),
-            os.path.join(os.path.dirname(__file__), 'pause.gif'),
-        ]
-        gif_path = next((p for p in candidates if os.path.exists(p)), None)
-        if not gif_path or Image is None:
+        gif_path = get_asset_path('pause.gif')
+        if not os.path.exists(gif_path) or Image is None:
             return
         try:
             with Image.open(gif_path) as im:  # Use context manager for better memory management
@@ -321,10 +318,20 @@ class MiniFootballGame:
 def main():
     """Main function"""
     try:
+        print("Creating MiniFootballGame instance...")
         game = MiniFootballGame()
+        print("MiniFootballGame created successfully, starting run...")
         game.run()
+    except RecursionError as e:
+        print(f"Recursion error: {e}")
+        import traceback
+        traceback.print_exc()
+        pygame.quit()
+        sys.exit(1)
     except Exception as e:
         print(f"Error running game: {e}")
+        import traceback
+        traceback.print_exc()
         pygame.quit()
         sys.exit(1)
 
