@@ -44,6 +44,24 @@ class GameManager:
         self.game_mode = 'goals_only'  # 'goals_only', 'turns_only', 'both'
         self.max_goals = 5  # First to reach this many goals wins (1-50)
         self.max_turns_limit = 50  # Game ends after this many turns (10-200)
+        
+        # Volume configuration (0.0 to 1.0) - load from constants
+        self.master_volume = DEFAULT_MASTER_VOLUME
+        self.sfx_volume = DEFAULT_SFX_VOLUME
+        self.bgm_volume = DEFAULT_BGM_VOLUME
+        
+        # Load background image and create gradient surface
+        try:
+            self.bg_image = pygame.image.load("assets/bg.png")
+            self.bg_image = pygame.transform.scale(self.bg_image, (SCREEN_WIDTH, SCREEN_HEIGHT))
+        except pygame.error:
+            self.bg_image = None
+        
+        self.gradient_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        
+        # Audio configuration save debouncing
+        self._audio_save_timer = 0
+        self._audio_save_delay = 1000  # Save after 1 second of no changes
 
         # Scores
         self.team1_score = 0
@@ -71,6 +89,15 @@ class GameManager:
             'opponent_distances': None,
             'team_distances': None
         }
+        
+        # Enhanced bot state tracking and prediction
+        self._bot_ball_history = []  # Track ball positions for velocity prediction
+        self._bot_player_positions = {}  # Track opponent player positions
+        self._bot_anticipation_mode = False  # Whether bot is in anticipation mode
+        self._bot_defensive_formation = False  # Whether bot should prioritize defense
+        self._bot_last_opponent_action = 0  # Time of last opponent action
+        self._bot_pattern_detection = {}  # Track opponent patterns
+        self._bot_pressure_zones = []  # Areas where bot applies pressure
         
         # Text rendering cache
         self._text_cache = {}  # Track active collision pairs to prevent sound spam
@@ -128,7 +155,8 @@ class GameManager:
             ("Difficulty", None),
             ("Game Mode", None),
             ("Goal Limit", None),
-            ("Turn Limit", None)
+            ("Turn Limit", None),
+            ("Audio Settings", None)
         ]
         self._menu_index = 0
         
@@ -138,6 +166,14 @@ class GameManager:
         self._fast_key_repeat_delay = 40  # Faster repeat for value changes
         self._last_navigation_time = 0  # Last time a navigation key was pressed
         self._last_value_change_time = 0  # Last time a value change key was pressed
+        
+        # Audio settings menu state
+        self._audio_menu_items = [
+            ("Master Volume", None),
+            ("SFX Volume", None),
+            ("BGM Volume", None)
+        ]
+        self._audio_menu_index = 0
         
         # Tactics selection state
         self._tactics_phase = 'select'  # 'select' or 'custom'
@@ -198,7 +234,7 @@ class GameManager:
     def update_music(self):
         """Update background music based on current game state."""
         # Determine what music should be playing
-        if self.game_state in [GAME_STATE_MENU, GAME_STATE_TACTICS, GAME_STATE_CUSTOM_TACTICS, GAME_STATE_COIN_FLIP]:
+        if self.game_state in [GAME_STATE_MENU, GAME_STATE_AUDIO, GAME_STATE_TACTICS, GAME_STATE_CUSTOM_TACTICS, GAME_STATE_COIN_FLIP]:
             target_music = 'menu'
         elif self.game_state == GAME_STATE_GAME_OVER:
             target_music = self.get_ending_music_type()
@@ -678,6 +714,11 @@ class GameManager:
     
     def update(self):
         """Update game state"""
+        # Audio automatic saving (debounced)
+        if self._audio_save_timer > 0 and pygame.time.get_ticks() >= self._audio_save_timer:
+            self.save_audio_configuration()
+            self._audio_save_timer = 0
+            
         # CRITICAL: No game logic should run during pause
         if self.game_state == GAME_STATE_PAUSED:
             return
@@ -718,6 +759,10 @@ class GameManager:
 
         if self.game_state != GAME_STATE_PLAYING:
             return
+        
+        # Update bot tracking systems (when playing)
+        if self.singleplayer:
+            self._update_bot_tracking()
         
         # Seed aim arrow once toward the current ball for both human and bot turns
         if self.current_phase == PHASE_AIM_DIRECTION and not self._aim_seeded:
@@ -988,6 +1033,9 @@ class GameManager:
         if self.game_state == GAME_STATE_MENU:
             self.handle_menu_keypress(key)
             return
+        elif self.game_state == GAME_STATE_AUDIO:
+            self.handle_audio_menu_keypress(key)
+            return
         elif self.game_state == GAME_STATE_TACTICS:
             self.handle_tactics_keypress(key)
             return
@@ -1083,7 +1131,7 @@ class GameManager:
                 self.bot_team = 1 if self.bot_team == 2 else 2
                 return
             elif self._menu_index == 2 and self.singleplayer:  # Difficulty
-                order = ["easy", "medium", "hard"]
+                order = ["easy", "medium", "hard", "insane", "extreme"]
                 idx = order.index(self.bot_difficulty) if self.bot_difficulty in order else 1
                 if key in (pygame.K_LEFT, pygame.K_a):
                     idx = (idx - 1) % len(order)
@@ -1117,16 +1165,87 @@ class GameManager:
                 self.max_turns = self.max_turns_limit
                 return
 
-        # Start the game (Enter/Space) from any item
+        # Handle Enter/Space - start game or enter audio settings
         if key in (pygame.K_RETURN, pygame.K_SPACE):
-            # Go to tactics selection instead of directly to playing
-            self.game_state = GAME_STATE_TACTICS
+            if self._menu_index == 6:  # Audio Settings
+                self.game_state = GAME_STATE_AUDIO
+                self.update_music()
+                return
+            else:
+                # Go to tactics selection instead of directly to playing
+                self.game_state = GAME_STATE_TACTICS
+                self.update_music()
+                self._start_tactics_selection()
+                return
+
+    def handle_audio_menu_keypress(self, key):
+        """Handle keyboard input for audio settings menu"""
+        # ESC key to return to main menu
+        if key == pygame.K_ESCAPE:
+            self.game_state = GAME_STATE_MENU
             self.update_music()
-            self._start_tactics_selection()
             return
 
+        # Navigate with key repeat delay
+        if key in (pygame.K_UP, pygame.K_w):
+            if self._can_repeat_key('navigation'):
+                self._audio_menu_index = self._prev_audio_enabled_index(self._audio_menu_index)
+                self._update_key_repeat_time('navigation')
+            return
+        if key in (pygame.K_DOWN, pygame.K_s):
+            if self._can_repeat_key('navigation'):
+                self._audio_menu_index = self._next_audio_enabled_index(self._audio_menu_index)
+                self._update_key_repeat_time('navigation')
+            return
+
+        # Adjust values for current selection with faster key repeat delay
+        if key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_a, pygame.K_d):
+            if not self._can_repeat_key('value_change'):
+                return  # Too soon, ignore this key press
+            
+            self._update_key_repeat_time('value_change')
+            
+            if self._audio_menu_index == 0:  # Master Volume
+                if key in (pygame.K_LEFT, pygame.K_a):
+                    self.master_volume = max(0.0, self.master_volume - 0.01)
+                else:
+                    self.master_volume = min(1.0, self.master_volume + 0.01)
+                self.sync_volume_settings()
+                return
+            elif self._audio_menu_index == 1:  # SFX Volume
+                if key in (pygame.K_LEFT, pygame.K_a):
+                    self.sfx_volume = max(0.0, self.sfx_volume - 0.01)
+                else:
+                    self.sfx_volume = min(1.0, self.sfx_volume + 0.01)
+                self.sync_volume_settings()
+                return
+            elif self._audio_menu_index == 2:  # BGM Volume
+                if key in (pygame.K_LEFT, pygame.K_a):
+                    self.bgm_volume = max(0.0, self.bgm_volume - 0.01)
+                else:
+                    self.bgm_volume = min(1.0, self.bgm_volume + 0.01)
+                self.sync_volume_settings()
+                return
+
+        # Note: No Enter/Space handling needed since we removed Return to Main Menu option
+        # ESC key is the only way to return to main menu
+
+    def _next_audio_enabled_index(self, current: int) -> int:
+        n = len(self._audio_menu_items)
+        for step in range(1, n + 1):
+            cand = (current + step) % n
+            return cand  # All audio menu items are always enabled
+        return current
+
+    def _prev_audio_enabled_index(self, current: int) -> int:
+        n = len(self._audio_menu_items)
+        for step in range(1, n + 1):
+            cand = (current - step) % n
+            return cand  # All audio menu items are always enabled
+        return current
+
     def _menu_item_enabled(self, idx: int) -> bool:
-        # idx: 0 Mode, 1 Bot Team, 2 Difficulty, 3 Game Mode, 4 Goal Limit, 5 Turn Limit
+        # idx: 0 Mode, 1 Bot Team, 2 Difficulty, 3 Game Mode, 4 Goal Limit, 5 Turn Limit, 6 Audio Settings
         if idx == 0:  # Mode
             return True
         elif idx in (1, 2):  # Bot Team, Difficulty
@@ -1137,6 +1256,8 @@ class GameManager:
             return self.game_mode in ['goals_only', 'both']
         elif idx == 5:  # Turn Limit
             return self.game_mode in ['turns_only', 'both']
+        elif idx == 6:  # Audio Settings
+            return True
         return True
 
     def _next_enabled_index(self, current: int) -> int:
@@ -1402,7 +1523,7 @@ class GameManager:
         return self.singleplayer and self.current_team == self.bot_team
 
     def _bot_context(self):
-        """Return a dict of global context the bot can use to adapt strategy."""
+        """Return enhanced context with threat assessment and predictive analysis."""
         score_diff = (self.team1_score - self.team2_score) if self.bot_team == 1 else (self.team2_score - self.team1_score)
         turns_left = max(0, self.max_turns - self.turn_number)
         endgame = turns_left <= BOT_ENDGAME_TURNS
@@ -1410,6 +1531,13 @@ class GameManager:
         trailing = score_diff < 0
         tied = score_diff == 0
         risk = BOT_BASE_RISK.get(self.bot_difficulty, 0.6)
+        
+        # Enhanced context with predictive elements
+        ball_velocity = self._calculate_ball_velocity()
+        predicted_ball_pos = self._predict_ball_position(1.5)  # Predict 1.5 seconds ahead
+        threat_level = self._assess_threat_level()
+        defensive_pressure = self._calculate_defensive_pressure()
+        
         return {
             "score_diff": score_diff,
             "turns_left": turns_left,
@@ -1418,6 +1546,11 @@ class GameManager:
             "trailing": trailing,
             "tied": tied,
             "risk": risk,
+            "ball_velocity": ball_velocity,
+            "predicted_ball_pos": predicted_ball_pos,
+            "threat_level": threat_level,
+            "defensive_pressure": defensive_pressure,
+            "anticipation_mode": self._bot_anticipation_mode
         }
 
     def _bot_pick_player_index(self):
@@ -1458,13 +1591,31 @@ class GameManager:
         any_can_kick = any(cached_team_dists[i] <= (players[i].radius + self.ball.radius + KICK_RANGE_BONUS) and players[i].can_move 
                           for i in range(len(players)))
 
-        # Decide intent
+        # Enhanced intent decision with predictive analysis
+        predicted_ball_x, predicted_ball_y = ctx.get('predicted_ball_pos', (bx, by))
+        threat_level = ctx.get('threat_level', 0.0)
+        defensive_pressure = ctx.get('defensive_pressure', 0.0)
+        anticipation_mode = ctx.get('anticipation_mode', False)
+        
+        # Decide intent with enhanced logic
         if any_can_kick:
             intent = 'shoot'
-        elif ball_on_our_side and (opp_nearest + 12 < my_nearest):
+        elif threat_level > 0.6 or (ball_on_our_side and defensive_pressure > 0.5):
             intent = 'defend'
+        elif anticipation_mode and opp_nearest < my_nearest * 0.8:
+            # In anticipation mode, be more defensive when opponents are closer
+            intent = 'intercept'
         else:
-            intent = 'attack'
+            # Use predicted ball position for attack positioning
+            pred_my_nearest = min((math.hypot(p.x - predicted_ball_x, p.y - predicted_ball_y) 
+                                 for p in players if p.can_move), default=1e9)
+            pred_opp_nearest = min((math.hypot(o.x - predicted_ball_x, o.y - predicted_ball_y) 
+                                  for o in opponents), default=1e9)
+            
+            if pred_my_nearest < pred_opp_nearest * 1.2:
+                intent = 'attack'
+            else:
+                intent = 'defend'
 
         # Weighting by difficulty
         # Difficulty-based jitter; shrink in endgame if trailing to be sharper
@@ -1512,6 +1663,18 @@ class GameManager:
                     score += (FIELD_X + FIELD_WIDTH * 0.25 - px) * 0.05
                 else:
                     score += (px - (FIELD_X + FIELD_WIDTH * 0.75)) * 0.05
+            elif intent == 'intercept':
+                # New intercept mode: position to intercept predicted ball path
+                d_predicted = math.hypot(px - predicted_ball_x, py - predicted_ball_y)
+                # High score for being close to predicted ball position
+                score += 600.0 / (d_predicted + 1)
+                # Bonus for being between current ball and predicted position
+                intercept_factor = self._calculate_intercept_position_score(px, py, bx, by, predicted_ball_x, predicted_ball_y)
+                score += intercept_factor * 200
+                # Penalty for being too far from our goal (don't abandon defense completely)
+                d_own_goal = math.hypot(px - gx_own, py - gy_own)
+                if d_own_goal > FIELD_WIDTH * 0.6:
+                    score -= 100
             else:  # attack
                 # Get to ball fast with less opposition on the route
                 lane = self._line_pressure(px, py, bx, by, opponents, lane_thresh)
@@ -1523,8 +1686,11 @@ class GameManager:
                 # Favor forward positions toward opponent goal
                 score += 100.0 / (math.hypot(px - gx_opp, py - gy_opp) + 1)
 
-            # Add small jitter to break ties on easier difficulties
-            score += random.uniform(-jitter, jitter)
+            # Enhanced difficulty-based jitter with anticipation adjustment
+            final_jitter = jitter
+            if anticipation_mode:
+                final_jitter *= 0.5  # More precise in anticipation mode
+            score += random.uniform(-final_jitter, final_jitter)
 
             if score > best_score:
                 best_score = score
@@ -1545,27 +1711,38 @@ class GameManager:
         can_kick = player.distance_to(bx, by) <= (player.radius + self.ball.radius + KICK_RANGE_BONUS)
         ctx = self._bot_context()
 
+        # Enhanced intent assessment with predictive analysis
+        predicted_ball_x, predicted_ball_y = ctx.get('predicted_ball_pos', (bx, by))
+        threat_level = ctx.get('threat_level', 0.0)
+        anticipation_mode = ctx.get('anticipation_mode', False)
+        
         if can_kick:
             # Shoot: pick opponent goal corner nearest to player
             targets = self._bot_goal_targets(acting_team)
             tx, ty = min(targets, key=lambda t: (t[0] - px) ** 2 + (t[1] - py) ** 2)
             return 'shoot', tx, ty
 
-        if ball_on_our_side:
-            # Defend: block the line from ball to our goal center
+        # Enhanced decision logic
+        if threat_level > 0.7 or ball_on_our_side:
+            # High threat or defensive situation: block the line from ball to our goal center
             gx, gy = self._own_goal_center(acting_team)
             tx = bx * 0.65 + gx * 0.35
             ty = by * 0.65 + gy * 0.35
             return 'defend', tx, ty
-
-        # Attack: move to ball with small lead based on ball velocity
-        lead = 18 if self.bot_difficulty == 'hard' else 10 if self.bot_difficulty == 'medium' else 0
-        if hasattr(self.ball, 'vx') and hasattr(self.ball, 'vy'):
-            tx = bx + (self.ball.vx * lead * 0.02)
-            ty = by + (self.ball.vy * lead * 0.02)
+        elif anticipation_mode:
+            # Anticipation mode: move to intercept predicted ball position
+            tx, ty = predicted_ball_x, predicted_ball_y
+            return 'intercept', tx, ty
         else:
-            tx, ty = bx, by
-        return 'attack', tx, ty
+            # Attack: enhanced prediction-based positioning
+            lead = 18 if self.bot_difficulty == 'hard' else 10 if self.bot_difficulty == 'medium' else 0
+            if hasattr(self.ball, 'vx') and hasattr(self.ball, 'vy'):
+                tx = bx + (self.ball.vx * lead * 0.02)
+                ty = by + (self.ball.vy * lead * 0.02)
+            else:
+                # Use predicted position if no velocity data
+                tx, ty = predicted_ball_x, predicted_ball_y
+            return 'attack', tx, ty
 
     def _own_goal_center(self, team=None):
         if team is None:
@@ -1698,6 +1875,140 @@ class GameManager:
             if self.current_phase == PHASE_SELECT_FORCE:
                 self.force_power = self._bot_force_choice()
                 self.execute_player_movement()
+
+    def _calculate_ball_velocity(self):
+        """Calculate ball velocity from recent position history."""
+        if len(self._bot_ball_history) < 2:
+            return (0, 0)
+        
+        # Use last two positions to estimate velocity
+        pos1 = self._bot_ball_history[-2]
+        pos2 = self._bot_ball_history[-1]
+        dt = pos2[2] - pos1[2]  # time difference
+        
+        if dt <= 0:
+            return (0, 0)
+        
+        vx = (pos2[0] - pos1[0]) / dt * 1000  # Convert to pixels per second
+        vy = (pos2[1] - pos1[1]) / dt * 1000
+        return (vx, vy)
+
+    def _predict_ball_position(self, seconds_ahead):
+        """Predict ball position based on current velocity and friction."""
+        vx, vy = self._calculate_ball_velocity()
+        
+        # Account for friction decay
+        friction_factor = FRICTION ** (seconds_ahead * 60)  # Assume 60 FPS
+        
+        predicted_x = self.ball.x + vx * seconds_ahead * friction_factor
+        predicted_y = self.ball.y + vy * seconds_ahead * friction_factor
+        
+        # Clamp to field bounds
+        predicted_x = max(FIELD_X, min(FIELD_X + FIELD_WIDTH, predicted_x))
+        predicted_y = max(FIELD_Y, min(FIELD_Y + FIELD_HEIGHT, predicted_y))
+        
+        return (predicted_x, predicted_y)
+
+    def _assess_threat_level(self):
+        """Assess threat level from opponent positions and ball location."""
+        if not self.singleplayer:
+            return 0.0
+        
+        bx, by = self.ball.x, self.ball.y
+        our_goal_x, our_goal_y = self._own_goal_center()
+        opponents = self._opponent_players()
+        
+        threat = 0.0
+        
+        # Distance threat: closer ball to our goal = higher threat
+        ball_goal_dist = math.hypot(bx - our_goal_x, by - our_goal_y)
+        max_dist = math.hypot(FIELD_WIDTH, FIELD_HEIGHT)
+        threat += (1.0 - ball_goal_dist / max_dist) * 0.4
+        
+        # Opponent threat: opponents close to ball and between ball and our goal
+        for opp in opponents:
+            if not opp.can_move:
+                continue
+            
+            opp_ball_dist = opp.distance_to(bx, by)
+            if opp_ball_dist < 100:  # Within threatening distance
+                # Check if opponent is between ball and our goal
+                opp_goal_dist = math.hypot(opp.x - our_goal_x, opp.y - our_goal_y)
+                if opp_goal_dist < ball_goal_dist:
+                    threat += (100 - opp_ball_dist) / 100 * 0.3
+        
+        return min(1.0, threat)
+
+    def _calculate_defensive_pressure(self):
+        """Calculate how much defensive pressure bot should apply."""
+        ctx = self._bot_context() if hasattr(self, '_bot_context') else {}
+        threat = self._assess_threat_level()
+        
+        pressure = threat * 0.5
+        
+        # Increase pressure when leading and in endgame
+        if ctx.get('leading', False) and ctx.get('endgame', False):
+            pressure += 0.3
+        
+        # Decrease pressure when trailing (more aggressive)
+        if ctx.get('trailing', False):
+            pressure *= 0.7
+        
+        return min(1.0, pressure)
+
+    def _update_bot_tracking(self):
+        """Update bot tracking systems each frame."""
+        now = pygame.time.get_ticks()
+        
+        # Update ball history for velocity prediction
+        self._bot_ball_history.append((self.ball.x, self.ball.y, now))
+        # Keep only last 5 positions
+        if len(self._bot_ball_history) > 5:
+            self._bot_ball_history.pop(0)
+        
+        # Update opponent position tracking
+        opponents = self._opponent_players()
+        for i, opp in enumerate(opponents):
+            self._bot_player_positions[f'opp_{i}'] = (opp.x, opp.y, now)
+        
+        # Detect if opponent just made an action
+        if self.current_team != self.bot_team and now - self._bot_last_opponent_action > 100:
+            self._bot_last_opponent_action = now
+            self._bot_anticipation_mode = True
+        
+        # Disable anticipation mode after some time
+        if self._bot_anticipation_mode and now - self._bot_last_opponent_action > 2000:
+            self._bot_anticipation_mode = False
+
+    def _calculate_intercept_position_score(self, px, py, ball_x, ball_y, pred_x, pred_y):
+        """Calculate how good a position is for intercepting ball movement."""
+        # Vector from current ball to predicted position
+        ball_vec_x = pred_x - ball_x
+        ball_vec_y = pred_y - ball_y
+        ball_vec_len = math.hypot(ball_vec_x, ball_vec_y)
+        
+        if ball_vec_len < 1:
+            return 0.0  # Ball not moving much
+        
+        # Normalize ball movement vector
+        ball_unit_x = ball_vec_x / ball_vec_len
+        ball_unit_y = ball_vec_y / ball_vec_len
+        
+        # Vector from current ball to player
+        to_player_x = px - ball_x
+        to_player_y = py - ball_y
+        
+        # Project player position onto ball movement line
+        dot_product = to_player_x * ball_unit_x + to_player_y * ball_unit_y
+        
+        # Player is ahead of ball movement = good intercept position
+        if 0 < dot_product < ball_vec_len:
+            # Calculate perpendicular distance to ball path
+            perp_dist = abs(to_player_x * ball_unit_y - to_player_y * ball_unit_x)
+            # Good intercept if close to the path and ahead of ball
+            return max(0, 1.0 - perp_dist / 50.0)  # 50 pixel tolerance
+        
+        return 0.0
     
     def draw_scoreboard(self, screen):
         """Draw the scoreboard"""
@@ -1849,7 +2160,10 @@ class GameManager:
             'max_goals': self.max_goals,
             'max_turns_limit': self.max_turns_limit,
             'team1_tactic': self.tactics_manager.get_team_tactic(1),
-            'team2_tactic': self.tactics_manager.get_team_tactic(2)
+            'team2_tactic': self.tactics_manager.get_team_tactic(2),
+            'master_volume': self.master_volume,
+            'sfx_volume': self.sfx_volume,
+            'bgm_volume': self.bgm_volume
         }
         
         # Reset game state
@@ -1867,6 +2181,12 @@ class GameManager:
         self.tactics_manager.set_team_tactic(1, saved_config['team1_tactic'])
         self.tactics_manager.set_team_tactic(2, saved_config['team2_tactic'])
         
+        # Restore volume settings
+        self.master_volume = saved_config['master_volume']
+        self.sfx_volume = saved_config['sfx_volume']
+        self.bgm_volume = saved_config['bgm_volume']
+        self.sync_volume_settings()
+        
         # Update dependent settings
         self.max_turns = self.max_turns_limit
         self._bot_action_cooldown_ms = BOT_THINK_MS.get(self.bot_difficulty, self._bot_action_cooldown_ms)
@@ -1876,6 +2196,53 @@ class GameManager:
         
         # Note: _music_initialized is set to False in __init__, 
         # music will be updated by start_coin_flip() call
+    
+    def save_audio_configuration(self):
+        """Save current audio settings to constants.py for persistence"""
+        try:
+            # Read the current constants.py file
+            with open('constants.py', 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Update the audio configuration values
+            import re
+            
+            # Replace DEFAULT_MASTER_VOLUME
+            content = re.sub(
+                r'DEFAULT_MASTER_VOLUME = [0-9.]+',
+                f'DEFAULT_MASTER_VOLUME = {self.master_volume:.2f}',
+                content
+            )
+            
+            # Replace DEFAULT_SFX_VOLUME
+            content = re.sub(
+                r'DEFAULT_SFX_VOLUME = [0-9.]+',
+                f'DEFAULT_SFX_VOLUME = {self.sfx_volume:.2f}',
+                content
+            )
+            
+            # Replace DEFAULT_BGM_VOLUME
+            content = re.sub(
+                r'DEFAULT_BGM_VOLUME = [0-9.]+',
+                f'DEFAULT_BGM_VOLUME = {self.bgm_volume:.2f}',
+                content
+            )
+            
+            # Write the updated content back
+            with open('constants.py', 'w', encoding='utf-8') as f:
+                f.write(content)   
+        except Exception as e:
+            print(f"Failed to save audio configuration: {e}")
+
+    def sync_volume_settings(self):
+        """Synchronize volume settings from GameManager to SoundManager"""
+        self.sounds.set_volume_levels(
+            self.master_volume,
+            self.sfx_volume,
+            self.bgm_volume
+        )
+        # Schedule audio configuration save (debounced)
+        self._audio_save_timer = pygame.time.get_ticks() + self._audio_save_delay
     
     def return_to_menu_with_config(self):
         """Return to menu while preserving user configuration settings"""
@@ -1888,7 +2255,10 @@ class GameManager:
             'max_goals': self.max_goals,
             'max_turns_limit': self.max_turns_limit,
             'team1_tactic': self.tactics_manager.get_team_tactic(1),
-            'team2_tactic': self.tactics_manager.get_team_tactic(2)
+            'team2_tactic': self.tactics_manager.get_team_tactic(2),
+            'master_volume': self.master_volume,
+            'sfx_volume': self.sfx_volume,
+            'bgm_volume': self.bgm_volume
         }
         
         # Reset game state
@@ -1906,6 +2276,12 @@ class GameManager:
         self.tactics_manager.set_team_tactic(1, saved_config['team1_tactic'])
         self.tactics_manager.set_team_tactic(2, saved_config['team2_tactic'])
         
+        # Restore volume settings
+        self.master_volume = saved_config['master_volume']
+        self.sfx_volume = saved_config['sfx_volume']
+        self.bgm_volume = saved_config['bgm_volume']
+        self.sync_volume_settings()
+        
         # Update dependent settings
         self.max_turns = self.max_turns_limit
         self._bot_action_cooldown_ms = BOT_THINK_MS.get(self.bot_difficulty, self._bot_action_cooldown_ms)
@@ -1917,13 +2293,18 @@ class GameManager:
     def draw(self, screen):
         """Draw everything"""
         if self.game_state == GAME_STATE_MENU:
-            # Clear background
-            screen.fill(BLACK)
+            # Draw background image with gradient overlay
+            self._draw_menu_background(screen)
             self.draw_menu(screen)
             return
+        elif self.game_state == GAME_STATE_AUDIO:
+            # Draw background image with gradient overlay
+            self._draw_menu_background(screen)
+            self.draw_audio_menu(screen)
+            return
         elif self.game_state == GAME_STATE_TACTICS:
-            # Clear background
-            screen.fill(BLACK)
+            # Draw background image with gradient overlay
+            self._draw_menu_background(screen)
             self.draw_tactics_selection(screen)
             
             # Draw invalid tactics dialog if needed (highest priority)
@@ -1934,6 +2315,8 @@ class GameManager:
                 self.draw_reset_all_confirmation(screen)
             return
         elif self.game_state == GAME_STATE_CUSTOM_TACTICS:
+            # Draw background image with gradient overlay
+            self._draw_menu_background(screen)
             # Custom tactics editor handles its own drawing
             self.custom_tactics_editor.draw(screen)
             
@@ -1944,8 +2327,8 @@ class GameManager:
                 self.draw_unsaved_changes_dialog(screen)
             return
         elif self.game_state == GAME_STATE_COIN_FLIP:
-            # Clear background
-            screen.fill(BLACK)
+            # Draw background image with gradient overlay
+            self._draw_menu_background(screen)
             self.draw_coin_flip(screen)
             return
         elif self.game_state == GAME_STATE_GAME_OVER:
@@ -2080,12 +2463,61 @@ class GameManager:
                                (int(scaled_player_x), int(scaled_player_y)), 
                                (int(end_x), int(end_y)), 3)
 
+    def _draw_menu_background(self, screen):
+        """Draw background image with gradient overlay for menu states"""
+        if self.bg_image:
+            screen.blit(self.bg_image, (0, 0))
+            # Create and draw gradient overlay
+            self._create_gradient_overlay()
+            screen.blit(self.gradient_surface, (0, 0))
+        else:
+            screen.fill(BLACK)
+
+    def _reduce_rgb(self, color, amount=20):
+        """Reduce each RGB component by the specified amount, clamping to 0"""
+        return tuple(max(0, c - amount) for c in color[:3])
+    
+    def _create_gradient_overlay(self):
+        """Create gradient overlay based on current difficulty"""
+        # Get current and next difficulty colors
+        difficulties = ["easy", "medium", "hard", "insane", "extreme"]
+        current_idx = difficulties.index(self.bot_difficulty.lower())
+        
+        current_color = DIFFICULTY_COLORS[self.bot_difficulty.lower()]
+        
+        # Determine end color for gradient
+        if current_idx < len(difficulties) - 1:
+            next_color = DIFFICULTY_COLORS[difficulties[current_idx + 1]]
+        else:
+            # Extreme difficulty goes to black
+            next_color = BLACK
+        
+        # Reduce RGB values by 20
+        start_color = self._reduce_rgb(current_color, 20)
+        end_color = self._reduce_rgb(next_color, 20)
+        
+        # Create vertical gradient surface
+        self.gradient_surface.fill((0, 0, 0, 0))  # Clear with transparency
+        
+        for y in range(SCREEN_HEIGHT):
+            # Calculate interpolation factor (0.0 at top, 1.0 at bottom)
+            factor = y / SCREEN_HEIGHT
+            
+            # Interpolate between start and end colors
+            r = int(start_color[0] + (end_color[0] - start_color[0]) * factor)
+            g = int(start_color[1] + (end_color[1] - start_color[1]) * factor)
+            b = int(start_color[2] + (end_color[2] - start_color[2]) * factor)
+            
+            # Draw horizontal line with interpolated color (semi-transparent)
+            color = (r, g, b, 100)  # 100/255 alpha for soft overlay
+            pygame.draw.line(self.gradient_surface, color, (0, y), (SCREEN_WIDTH, y))
+
     def draw_menu(self, screen):
         title_font = pygame.font.Font(None, 64)
         item_font = pygame.font.Font(None, 36)
         small_font = pygame.font.Font(None, 24)
 
-        title = title_font.render("Mini Football", True, WHITE)
+        title = title_font.render("Mini Football", True, MENU_TEXT_COLOR)
         title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 120))
         screen.blit(title, title_rect)
 
@@ -2104,6 +2536,11 @@ class GameManager:
         
         goal_limit_val = f"{self.max_goals} goal{'s' if self.max_goals != 1 else ''}"
         turn_limit_val = f"{self.max_turns_limit} turns"
+        
+        # Volume values (displayed as percentages)
+        master_vol_val = f"{int(self.master_volume * 100)}%"
+        sfx_vol_val = f"{int(self.sfx_volume * 100)}%"
+        bgm_vol_val = f"{int(self.bgm_volume * 100)}%"
 
         items = [
             ("Mode", mode_val),
@@ -2112,6 +2549,7 @@ class GameManager:
             ("Game Mode", game_mode_val),
             ("Goal Limit", goal_limit_val),
             ("Turn Limit", turn_limit_val),
+            ("Audio Settings", ""),
         ]
 
         start_y = 180
@@ -2119,15 +2557,50 @@ class GameManager:
         for i, (label, val) in enumerate(items):
             is_sel = (i == self._menu_index)
             enabled = self._menu_item_enabled(i)
-            base_color = WHITE if enabled else LIGHT_GRAY
-            color = YELLOW if (is_sel and enabled) else base_color
-            label_surf = item_font.render(f"{label}", True, color)
-            val_surf = item_font.render(f"{val}", True, color)
-            lx = SCREEN_WIDTH // 2 - 200
-            vx = SCREEN_WIDTH // 2 + 80
-            y = start_y + i * gap
-            screen.blit(label_surf, (lx, y))
-            screen.blit(val_surf, (vx, y))
+            base_color = MENU_TEXT_COLOR if enabled else LIGHT_GRAY
+            color = LIGHT_BLUE if (is_sel and enabled) else base_color
+            
+            # Special handling for Audio Settings - center it
+            if i == 6:  # Audio Settings
+                label_surf = item_font.render(f"{label}", True, color)
+                label_rect = label_surf.get_rect(center=(SCREEN_WIDTH // 2, start_y + i * gap))
+                screen.blit(label_surf, label_rect)
+            # Special handling for Difficulty - color-coded
+            elif i == 2 and label == "Difficulty":  # Difficulty
+                # Get difficulty color - ensure lowercase key lookup
+                diff_color = DIFFICULTY_COLORS.get(self.bot_difficulty.lower(), MENU_TEXT_COLOR)
+                
+                # For difficulty, always use difficulty color, never override with selection color
+                label_color = LIGHT_BLUE if is_sel else MENU_TEXT_COLOR
+                val_color = diff_color  # Always use difficulty color
+                
+                label_surf = item_font.render(f"{label}", True, label_color)
+                val_surf = item_font.render(f"{val}", True, val_color)
+                
+                lx = SCREEN_WIDTH // 2 - 200
+                vx = SCREEN_WIDTH // 2 + 80
+                y = start_y + i * gap
+                
+                # If selected, draw a subtle background highlight to show selection
+                if is_sel:
+                    # Create a subtle background rectangle
+                    highlight_rect = pygame.Rect(lx - 5, y - 2, 400, 32)
+                    # Use a very transparent white overlay
+                    highlight_surface = pygame.Surface((highlight_rect.width, highlight_rect.height))
+                    highlight_surface.set_alpha(30)  # Very subtle
+                    highlight_surface.fill(WHITE)
+                    screen.blit(highlight_surface, highlight_rect)
+                
+                screen.blit(label_surf, (lx, y))
+                screen.blit(val_surf, (vx, y))
+            else:
+                label_surf = item_font.render(f"{label}", True, color)
+                val_surf = item_font.render(f"{val}", True, color)
+                lx = SCREEN_WIDTH // 2 - 200
+                vx = SCREEN_WIDTH // 2 + 80
+                y = start_y + i * gap
+                screen.blit(label_surf, (lx, y))
+                screen.blit(val_surf, (vx, y))
 
         # Game mode descriptions
         desc_y = start_y + len(items) * gap + 20
@@ -2140,6 +2613,17 @@ class GameManager:
         else:
             desc = ""
         
+        # Add difficulty description when singleplayer and difficulty is selected
+        if self.singleplayer and self._menu_index == 2:
+            difficulty_descriptions = {
+                "easy": "Relaxed pace, forgiving AI",
+                "medium": "Balanced challenge",
+                "hard": "Quick decisions, smart AI",
+                "insane": "Lightning fast, aggressive AI",
+                "extreme": "Inhuman precision and speed"
+            }
+            desc = difficulty_descriptions.get(self.bot_difficulty, desc)
+        
         if desc:
             desc_surf = small_font.render(desc, True, LIGHT_GRAY)
             desc_rect = desc_surf.get_rect(center=(SCREEN_WIDTH // 2, desc_y))
@@ -2147,6 +2631,53 @@ class GameManager:
 
         hint = small_font.render("Up/Down to navigate • Left/Right to change • Press Enter to start", True, LIGHT_GRAY)
         hint_rect = hint.get_rect(center=(SCREEN_WIDTH // 2, desc_y + 40))
+        screen.blit(hint, hint_rect)
+
+    def draw_audio_menu(self, screen):
+        """Draw the audio settings menu"""
+        title_font = pygame.font.Font(None, 64)
+        item_font = pygame.font.Font(None, 36)
+        small_font = pygame.font.Font(None, 24)
+
+        title = title_font.render("Audio Settings", True, MENU_TEXT_COLOR)
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 120))
+        screen.blit(title, title_rect)
+
+        # Volume values (displayed as percentages)
+        master_vol_val = f"{int(self.master_volume * 100)}%"
+        sfx_vol_val = f"{int(self.sfx_volume * 100)}%"
+        bgm_vol_val = f"{int(self.bgm_volume * 100)}%"
+
+        items = [
+            ("Master Volume", master_vol_val),
+            ("SFX Volume", sfx_vol_val),
+            ("BGM Volume", bgm_vol_val),
+        ]
+
+        start_y = 200
+        gap = 50
+        for i, (label, val) in enumerate(items):
+            is_sel = (i == self._audio_menu_index)
+            color = LIGHT_BLUE if is_sel else WHITE
+            label_surf = item_font.render(f"{label}", True, color)
+            val_surf = item_font.render(f"{val}", True, color)
+            lx = SCREEN_WIDTH // 2 - 200
+            vx = SCREEN_WIDTH // 2 + 80
+            y = start_y + i * gap
+            screen.blit(label_surf, (lx, y))
+            screen.blit(val_surf, (vx, y))
+
+        # ESC instruction as subtitle
+        subtitle_y = start_y + len(items) * gap + 30
+        subtitle = small_font.render("Press ESC to return to main menu", True, LIGHT_GRAY)
+        subtitle_rect = subtitle.get_rect(center=(SCREEN_WIDTH // 2, subtitle_y))
+        screen.blit(subtitle, subtitle_rect)
+
+        # Instructions
+        instruction_y = subtitle_y + 40
+        instruction = "Up/Down to navigate • Left/Right to adjust volume"
+        hint = small_font.render(instruction, True, LIGHT_GRAY)
+        hint_rect = hint.get_rect(center=(SCREEN_WIDTH // 2, instruction_y))
         screen.blit(hint, hint_rect)
     
     def draw_save_confirmation(self, screen):
@@ -2170,7 +2701,7 @@ class GameManager:
         
         # Title
         font = pygame.font.Font(None, 36)
-        title_text = font.render("Save Custom Tactics?", True, WHITE)
+        title_text = font.render("Save Custom Tactics?", True, MENU_TEXT_COLOR)
         title_rect = title_text.get_rect(center=(dialog_x + dialog_width // 2, dialog_y + 40))
         screen.blit(title_text, title_rect)
         
@@ -2218,7 +2749,7 @@ class GameManager:
         
         # Title
         font = pygame.font.Font(None, 36)
-        title_text = font.render("Reset All Custom Tactics?", True, WHITE)
+        title_text = font.render("Reset All Custom Tactics?", True, MENU_TEXT_COLOR)
         title_rect = title_text.get_rect(center=(dialog_x + dialog_width // 2, dialog_y + 40))
         screen.blit(title_text, title_rect)
         
@@ -2263,7 +2794,7 @@ class GameManager:
         
         # Title
         font = pygame.font.Font(None, 36)
-        title_text = font.render("Delete Custom Tactic?", True, WHITE)
+        title_text = font.render("Delete Custom Tactic?", True, MENU_TEXT_COLOR)
         title_rect = title_text.get_rect(center=(dialog_x + dialog_width // 2, dialog_y + 40))
         screen.blit(title_text, title_rect)
         
@@ -2296,7 +2827,7 @@ class GameManager:
         small_font = pygame.font.Font(None, 24)
         
         # Title
-        title = title_font.render("Select Tactics", True, WHITE)
+        title = title_font.render("Select Tactics", True, MENU_TEXT_COLOR)
         title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 50))
         screen.blit(title, title_rect)
         
@@ -2384,7 +2915,7 @@ class GameManager:
                                                        preview_x, preview_y, scale=0.8)
             
             # Preview label
-            preview_label = small_font.render("Formation Preview:", True, WHITE)
+            preview_label = small_font.render("Formation Preview:", True, MENU_TEXT_COLOR)
             screen.blit(preview_label, (preview_x, preview_y - 25))
 
         # Draw delete confirmation dialog if needed

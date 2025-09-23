@@ -57,6 +57,11 @@ class SoundManager:
         # Track current music state
         self._current_music_type = None  # 'menu', 'ingame', or None
         self._music_paused = False
+        
+        # Volume channels (0.0 to 1.0)
+        self.master_volume = 1
+        self.sfx_volume = 1
+        self.bgm_volume = 1
 
         # Generate fallback tones only if external sounds are missing
         if not self._collision_sound:
@@ -165,6 +170,7 @@ class SoundManager:
         snd = self._collision_sound or self._collision_tone_hard or self._collision_tone_soft
         if snd is not None:
             try:
+                snd.set_volume(self._apply_sfx_volume())
                 snd.play()
             except Exception:
                 pass
@@ -175,6 +181,7 @@ class SoundManager:
         snd = self._goal_sound or self._goal_fanfare or self._collision_tone_hard or self._collision_tone_soft
         if snd is not None:
             try:
+                snd.set_volume(self._apply_sfx_volume())
                 snd.play()
             except Exception:
                 pass
@@ -185,6 +192,7 @@ class SoundManager:
         snd = self._pause_sound or self._pause_tone or self._collision_tone_soft
         if snd is not None:
             try:
+                snd.set_volume(self._apply_sfx_volume())
                 snd.play()
             except Exception:
                 pass
@@ -198,7 +206,8 @@ class SoundManager:
         
         if self._pause_audio is not None:
             try:
-                # Play with infinite loop (-1)
+                # Apply volume and play with infinite loop (-1)
+                self._pause_audio.set_volume(self._apply_sfx_volume())
                 self._pause_audio_channel = self._pause_audio.play(-1)
             except Exception:
                 pass
@@ -212,6 +221,7 @@ class SoundManager:
         if self._pause_audio_channel is None or not self._pause_audio_channel.get_busy():
             # Channel stopped or was never started, restart it
             try:
+                self._pause_audio.set_volume(self._apply_sfx_volume())
                 self._pause_audio_channel = self._pause_audio.play(-1)
             except Exception:
                 pass
@@ -273,6 +283,7 @@ class SoundManager:
         
         try:
             pygame.mixer.music.load(self._menu_music)
+            self._apply_music_volume()  # Apply volume before playing
             pygame.mixer.music.play(-1)  # Loop indefinitely
             self._current_music_type = 'menu'
             self._music_paused = False
@@ -289,6 +300,7 @@ class SoundManager:
         
         try:
             pygame.mixer.music.load(self._ingame_music)
+            self._apply_music_volume()  # Apply volume before playing
             pygame.mixer.music.play(-1)  # Loop indefinitely
             self._current_music_type = 'ingame'
             self._music_paused = False
@@ -417,3 +429,34 @@ class SoundManager:
     def get_current_music_type(self):
         """Get the type of music currently loaded ('menu', 'ingame', or None)."""
         return self._current_music_type
+    
+    def set_volume_levels(self, master: float, sfx: float, bgm: float):
+        """Set volume levels for all three channels.
+        
+        Args:
+            master: Master volume (0.0 to 1.0) - affects everything
+            sfx: Sound effects volume (0.0 to 1.0) - affects collision, goal, pause sounds
+            bgm: Background music volume (0.0 to 1.0) - affects all music
+        """
+        self.master_volume = max(0.0, min(1.0, master))
+        self.sfx_volume = max(0.0, min(1.0, sfx))
+        self.bgm_volume = max(0.0, min(1.0, bgm))
+        
+        # Apply BGM volume to current music if playing
+        if pygame.mixer.music.get_busy():
+            self._apply_music_volume()
+    
+    def _apply_music_volume(self):
+        """Apply the combined master and BGM volume to music."""
+        if not self.enabled:
+            return
+        
+        try:
+            combined_volume = self.master_volume * self.bgm_volume
+            pygame.mixer.music.set_volume(combined_volume)
+        except Exception:
+            pass
+    
+    def _apply_sfx_volume(self, base_volume: float = 1.0) -> float:
+        """Calculate the combined master and SFX volume for sound effects."""
+        return self.master_volume * self.sfx_volume * base_volume

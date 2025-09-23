@@ -27,6 +27,9 @@ class MiniFootballGame:
         # Initialize game manager
         self.game_manager = GameManager()
         
+        # Sync initial volume settings
+        self.game_manager.sync_volume_settings()
+        
         # Game running flag
         self.running = True
 

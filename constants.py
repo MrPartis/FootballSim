@@ -13,11 +13,24 @@ GREEN = (0, 255, 0)
 DARK_GREEN = (0, 150, 0)
 RED = (255, 0, 0)
 BLUE = (0, 0, 255)
-LIGHT_BLUE = (173, 216, 230)
+LIGHT_BLUE = (0,255,255)
 YELLOW = (255, 255, 0)
 ORANGE = (255, 165, 0)
 GRAY = (128, 128, 128)
 LIGHT_GRAY = (200, 200, 200)
+
+# Difficulty colors
+LIME = (0, 255, 0)
+LEMON = (255, 255, 0)
+DIFFICULTY_RED = (255, 0, 0)
+DARK_RED = (127, 0, 0)
+
+# UI Colors for better contrast
+MENU_TEXT_COLOR = (240, 240, 240)  # Light gray, better than pure white for contrast
+MENU_TEXT_COLOR = (240, 240, 240)  # Light gray, better than pure white for contrast
+
+# UI Colors for better contrast
+MENU_TEXT_COLOR = (240, 240, 240)  # Light gray, better than pure white for contrast
 
 # Field dimensions - adjusted for larger goals
 FIELD_WIDTH = 1100  # Reduced from 1220 to accommodate larger goals
@@ -110,6 +123,7 @@ GAME_STATE_FORCE_SELECT = 4
 GAME_STATE_PAUSED = 5
 GAME_STATE_GAME_OVER = 6
 GAME_STATE_CUSTOM_TACTICS = 7
+GAME_STATE_AUDIO = 8
 
 # Turn phases
 PHASE_SELECT_PLAYER = 0
@@ -136,35 +150,52 @@ KICKOFF_OFFSET = 80    # offset from center toward losing team's half
 # Modes and AI
 DEFAULT_SINGLEPLAYER = True  # start in singleplayer by default
 BOT_TEAM = 2                 # which team the bot controls in singleplayer
-BOT_DEFAULT_DIFFICULTY = "medium"  # easy | medium | hard
+BOT_DEFAULT_DIFFICULTY = "medium"  # easy | medium | hard | insane | extreme
 
 # Bot global tuning (Mario Party-like adaptive behavior)
 # Thinking delay per difficulty (ms between bot decisions)
 BOT_THINK_MS = {
-    "easy": 600,
-    "medium": 380,
-    "hard": 260,
+    "easy": 800,
+    "medium": 500,
+    "hard": 350,
+    "insane": 250,
+    "extreme": 150,
 }
 
 # Aim jitter magnitude by difficulty (higher = sloppier aim)
 BOT_AIM_JITTER = {
-    "easy": 14.0,
-    "medium": 6.0,
-    "hard": 2.5,
+    "easy": 18.0,
+    "medium": 10.0,
+    "hard": 5.0,
+    "insane": 2.0,
+    "extreme": 0.5,
 }
 
 # Force noise ratio by difficulty (multiplicative +/- noise)
 BOT_FORCE_NOISE = {
-    "easy": 0.22,
-    "medium": 0.12,
-    "hard": 0.05,
+    "easy": 0.30,
+    "medium": 0.18,
+    "hard": 0.10,
+    "insane": 0.05,
+    "extreme": 0.02,
 }
 
 # Baseline risk-taking (0=very safe, 1=very risky)
 BOT_BASE_RISK = {
-    "easy": 0.35,
-    "medium": 0.7,
-    "hard": 0.95,
+    "easy": 0.25,
+    "medium": 0.50,
+    "hard": 0.75,
+    "insane": 0.90,
+    "extreme": 0.98,
+}
+
+# Difficulty colors for UI display
+DIFFICULTY_COLORS = {
+    "easy": LIME,
+    "medium": LEMON,
+    "hard": ORANGE,
+    "insane": RED,
+    "extreme": DARK_RED
 }
 
 # How many turns left considered as endgame to ramp behavior
@@ -177,6 +208,21 @@ SOUND_FILES = {
     "goal": ["goal.wav", "goal.ogg", "goal.mp3"],
     "pause": ["pause.wav", "pause.ogg", "pause.mp3"],
     "pause_audio": ["pause_audio.mp3", "pause_audio.wav", "pause_audio.ogg"]
+}
+
+# Default audio configuration (automatically saved and loaded)
+DEFAULT_MASTER_VOLUME = 1.00  # Master volume (0.0 to 1.0)
+DEFAULT_SFX_VOLUME = 1.00     # Sound effects volume (0.0 to 1.0)
+DEFAULT_BGM_VOLUME = 1.00     # Background music volume (0.0 to 1.0)
+
+# Custom tactics configuration (automatically saved and loaded)
+DEFAULT_CUSTOM_TACTICS = {
+    'custom1': None,
+    'custom2': None,
+    'custom3': None,
+    'custom4': None,
+    'custom5': None,
+    'custom6': None,
 }
 
 # Corner/unstuck mechanics - doubled for scaled objects

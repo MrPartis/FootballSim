@@ -4,8 +4,6 @@ Manages player formations and tactical setups
 """
 import pygame
 import math
-import json
-import os
 from constants import *
 
 class TacticsManager:
@@ -54,21 +52,14 @@ class TacticsManager:
             }
         }
         
-        # Custom tactics slots (will be loaded from files or created by user)
-        self.custom_tactics = {
-            'custom1': None,
-            'custom2': None,
-            'custom3': None,
-            'custom4': None,
-            'custom5': None,
-            'custom6': None
-        }  # type: dict[str, dict | None]
+        # Custom tactics slots (loaded from constants.py)
+        self.custom_tactics = DEFAULT_CUSTOM_TACTICS.copy()  # Load from constants
         
         # Currently selected tactics
         self.team1_selected_tactic = 'balanced'  # Default
         self.team2_selected_tactic = 'balanced'  # Default
         
-        # Load custom tactics from file if they exist
+        # Load custom tactics from constants if they exist
         self.load_custom_tactics()
     
     def get_available_tactics(self):
@@ -186,17 +177,65 @@ class TacticsManager:
             'positions': positions.copy()
         }
         
-        # Save to file
-        self.save_custom_tactics()
+        # Save custom tactics to constants.py for persistence
+        self.save_custom_tactics_to_constants()
         return True
+    
+    def save_custom_tactics_to_constants(self):
+        """Save current custom tactics to constants.py for persistence"""
+        try:
+            # Read the current constants.py file
+            with open('constants.py', 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Convert custom tactics to string representation
+            import re
+            
+            # Create the tactics dictionary string
+            tactics_str = "DEFAULT_CUSTOM_TACTICS = {\n"
+            for key, tactic in self.custom_tactics.items():
+                if tactic is None:
+                    tactics_str += f"    '{key}': None,\n"
+                else:
+                    # Format positions as tuples
+                    positions_str = "[\n"
+                    for pos in tactic['positions']:
+                        positions_str += f"        {pos},\n"
+                    positions_str += "    ]"
+                    
+                    tactics_str += f"    '{key}': {{\n"
+                    tactics_str += f"        'name': '{tactic['name']}',\n"
+                    tactics_str += f"        'positions': {positions_str}\n"
+                    tactics_str += f"    }},\n"
+            tactics_str += "}"
+            
+            # Replace the DEFAULT_CUSTOM_TACTICS section using a more robust pattern
+            # Pattern matches from 'DEFAULT_CUSTOM_TACTICS = {' to the matching closing '}'
+            pattern = r'DEFAULT_CUSTOM_TACTICS\s*=\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+            if re.search(pattern, content, flags=re.DOTALL):
+                content = re.sub(pattern, tactics_str, content, flags=re.DOTALL)
+            else:
+                # If pattern not found, append to the end before other constants
+                insertion_point = content.find('\n# Corner/unstuck mechanics')
+                if insertion_point != -1:
+                    content = content[:insertion_point] + '\n' + tactics_str + '\n' + content[insertion_point:]
+                else:
+                    content += '\n\n' + tactics_str
+            
+            # Write the updated content back
+            with open('constants.py', 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+        except Exception as e:
+            print(f"Failed to save custom tactics: {e}")
     
     def reset_all_custom_tactics(self):
         """Clear all custom tactics and reset them to empty"""
         for slot in ['custom1', 'custom2', 'custom3', 'custom4', 'custom5', 'custom6']:
             self.custom_tactics[slot] = None
         
-        # Save the empty state to file
-        self.save_custom_tactics()
+        # Save changes to constants.py for persistence
+        self.save_custom_tactics_to_constants()
         return True
     
     def delete_custom_tactic(self, slot_key):
@@ -210,35 +249,22 @@ class TacticsManager:
         # Clear the slot
         self.custom_tactics[slot_key] = None
         
-        # Save the updated state to file
-        self.save_custom_tactics()
+        # Save changes to constants.py for persistence
+        self.save_custom_tactics_to_constants()
         return True
     
-    def save_custom_tactics(self):
-        """Save custom tactics to file"""
-        try:
-            tactics_data = {}
-            for key, tactic in self.custom_tactics.items():
-                if tactic is not None:
-                    tactics_data[key] = tactic
-            
-            with open('custom_tactics.json', 'w') as f:
-                json.dump(tactics_data, f, indent=2)
-        except Exception as e:
-            print(f"Error saving custom tactics: {e}")
-    
     def load_custom_tactics(self):
-        """Load custom tactics from file"""
-        try:
-            if os.path.exists('custom_tactics.json'):
-                with open('custom_tactics.json', 'r') as f:
-                    tactics_data = json.load(f)
-                
-                for key, tactic in tactics_data.items():
-                    if key in self.custom_tactics:
-                        self.custom_tactics[key] = tactic
-        except Exception as e:
-            print(f"Error loading custom tactics: {e}")
+        """Load custom tactics from constants.py"""
+        # Ensure we have the latest data from constants.py
+        self.custom_tactics = DEFAULT_CUSTOM_TACTICS.copy()
+        
+        # Deep copy any non-None tactics to avoid reference issues
+        for key, tactic in self.custom_tactics.items():
+            if tactic is not None:
+                self.custom_tactics[key] = {
+                    'name': tactic['name'],
+                    'positions': tactic['positions'].copy()
+                }
     
     def validate_positions(self, positions):
         """Validate that positions are within field bounds and reasonable"""
@@ -458,8 +484,9 @@ class TacticsManager:
                 self.custom_tactics[invalid['key']] = None
                 removed_count += 1
         
+        # Save changes to constants.py for persistence
         if removed_count > 0:
-            self.save_custom_tactics()
+            self.save_custom_tactics_to_constants()
         
         return removed_count
     
@@ -554,7 +581,7 @@ class TacticsManager:
                 
                 # Player number
                 font = pygame.font.Font(None, 28)  # Bigger font for better visibility
-                text = font.render(str(i + 1), True, WHITE)
+                text = font.render(str(i + 1), True, MENU_TEXT_COLOR)
                 text_rect = text.get_rect(center=(int(player_x), int(player_y)))
                 screen.blit(text, text_rect)
 
@@ -888,8 +915,8 @@ class CustomTacticsEditor:
         # Update consolidated warning state
         self.update_consolidated_warning()
         
-        # Clear screen
-        screen.fill(BLACK)
+        # Don't clear screen - background is handled by game manager
+        # The game manager draws the background and gradient overlay before calling this
         
         # Draw instructions
         font = pygame.font.Font(None, 36)
@@ -1018,7 +1045,7 @@ class CustomTacticsEditor:
             # Player number
             font_size = max(20, int(24 * self.field_scale))
             number_font = pygame.font.Font(None, font_size)
-            text = number_font.render(str(i + 1), True, WHITE)
+            text = number_font.render(str(i + 1), True, MENU_TEXT_COLOR)
             text_rect = text.get_rect(center=(int(screen_x), int(screen_y)))
             screen.blit(text, text_rect)
         
@@ -1054,7 +1081,7 @@ class CustomTacticsEditor:
             # Ball label
             label_font_size = max(16, int(20 * self.field_scale))
             ball_font = pygame.font.Font(None, label_font_size)
-            ball_text = ball_font.render("BALL", True, WHITE)
+            ball_text = ball_font.render("BALL", True, MENU_TEXT_COLOR)
             ball_text_rect = ball_text.get_rect(center=(int(ball_screen_x), int(ball_screen_y - 25 * self.field_scale)))
             screen.blit(ball_text, ball_text_rect)
         
@@ -1071,7 +1098,7 @@ class CustomTacticsEditor:
         pygame.draw.rect(screen, save_color, self.save_button_rect)
         pygame.draw.rect(screen, WHITE, self.save_button_rect, 2)
         
-        save_text = small_font.render("Save (S)", True, WHITE)
+        save_text = small_font.render("Save (S)", True, MENU_TEXT_COLOR)
         save_text_rect = save_text.get_rect(center=self.save_button_rect.center)
         screen.blit(save_text, save_text_rect)
         
@@ -1082,7 +1109,7 @@ class CustomTacticsEditor:
         pygame.draw.rect(screen, reset_color, self.reset_button_rect)
         pygame.draw.rect(screen, WHITE, self.reset_button_rect, 2)
         
-        reset_text = small_font.render("Reset (R)", True, WHITE)
+        reset_text = small_font.render("Reset (R)", True, MENU_TEXT_COLOR)
         reset_text_rect = reset_text.get_rect(center=self.reset_button_rect.center)
         screen.blit(reset_text, reset_text_rect)
         
@@ -1097,7 +1124,7 @@ class CustomTacticsEditor:
         
         y_offset = button_y + button_height + 20
         for instruction in instructions:
-            inst_text = small_font.render(instruction, True, WHITE)
+            inst_text = small_font.render(instruction, True, MENU_TEXT_COLOR)
             screen.blit(inst_text, (10, y_offset))
             y_offset += 25
         
