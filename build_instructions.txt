@@ -1,0 +1,21 @@
+# Mini Football Game - PyInstaller Build Script
+# This script creates a standalone executable for the Mini Football game
+
+# To build the executable:
+# 1. Install PyInstaller: pip install pyinstaller
+# 2. Run this command in the project directory:
+
+pyinstaller --onefile --windowed --name="MiniFootball" --icon=assets/icon.ico --add-data="assets;assets" main.py
+
+# Alternative command if you don't have an icon:
+# pyinstaller --onefile --windowed --name="MiniFootball" --add-data="assets;assets" main.py
+
+# Command breakdown:
+# --onefile      : Creates a single executable file instead of a folder
+# --windowed     : Hides the console window (remove if you want to see debug output)
+# --name         : Name of the executable file
+# --icon         : Icon for the executable (optional)
+# --add-data     : Include the assets folder and its contents
+# main.py        : Entry point script
+
+# The executable will be created in the 'dist' folder
