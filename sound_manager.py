@@ -51,27 +51,22 @@ class SoundManager:
         # Track pause audio channel for stopping
         self._pause_audio_channel = None
         
+        # Track which sound channels are paused by us (to avoid pausing pause audio)
+        self._paused_channels = set()
+        
         # Track current music state
         self._current_music_type = None  # 'menu', 'ingame', or None
         self._music_paused = False
 
-        if self._collision_sound is None:
+        # Generate fallback tones only if external sounds are missing
+        if not self._collision_sound:
             self._collision_tone_soft = self._build_tone(freq=420, ms=55, volume=0.45)
             self._collision_tone_hard = self._build_tone(freq=700, ms=45, volume=0.55)
         else:
-            self._collision_tone_soft = None
-            self._collision_tone_hard = None
+            self._collision_tone_soft = self._collision_tone_hard = None
 
-        if self._goal_sound is None:
-            self._goal_fanfare = self._build_fanfare()
-        else:
-            self._goal_fanfare = None
-
-        if self._pause_sound is None:
-            # Soft click/beep for pause
-            self._pause_tone = self._build_tone(freq=520, ms=90, volume=0.5)
-        else:
-            self._pause_tone = None
+        self._goal_fanfare = None if self._goal_sound else self._build_fanfare()
+        self._pause_tone = None if self._pause_sound else self._build_tone(freq=520, ms=90, volume=0.5)
 
     def _sine_wave(self, freq: float, length_ms: int, volume: float = 0.5) -> bytes:
         """Generate 16-bit PCM mono sine wave bytes."""
@@ -150,18 +145,11 @@ class SoundManager:
     def _build_fanfare(self) -> Optional[pygame.mixer.Sound]:
         if not self.enabled:
             return None
-        # Simple arpeggio fanfare
-        notes = [
-            (784, 140, 0.5),  # G5
-            (988, 140, 0.5),  # B5
-            (1175, 220, 0.5), # D6
-        ]
-        chunks = []
-        for f, d, v in notes:
-            pcm = bytearray(self._sine_wave(freq=f, length_ms=d, volume=v))
-            self._apply_linear_fade(pcm, fade_out_ms=18)
-            chunks.append(bytes(pcm))
-        pcm_concat = self._concat_pcm(chunks)
+        # Simpler, shorter fanfare to reduce memory usage
+        notes = [(784, 120, 0.5), (988, 120, 0.5), (1175, 180, 0.5)]  # Shorter durations
+        pcm_concat = self._concat_pcm([
+            self._sine_wave(f, d, v) for f, d, v in notes
+        ])
         try:
             return pygame.mixer.Sound(file=self._wav_bytes(pcm_concat))
         except Exception:
@@ -387,6 +375,44 @@ class SoundManager:
         if not self.enabled or self._current_music_type is None:
             return False
         return pygame.mixer.music.get_busy() and not self._music_paused
+
+    def pause_all_sounds(self):
+        """Pause all sound effects except pause audio and background music."""
+        if not self.enabled:
+            return
+        
+        # Store currently playing channels that we want to pause
+        # This captures the state before any new sounds (like pause audio) start
+        try:
+            # Get all currently playing channels
+            num_channels = pygame.mixer.get_num_channels()
+            for i in range(num_channels):
+                channel = pygame.mixer.Channel(i)
+                if channel.get_busy():
+                    # Pause this channel and track it for later resume
+                    channel.pause()
+                    self._paused_channels.add(channel)
+        except Exception:
+            pass
+    
+    def resume_all_sounds(self):
+        """Resume all sound effects that were paused by us."""
+        if not self.enabled:
+            return
+        
+        try:
+            # Resume only the channels we paused, but skip pause audio channel
+            channels_to_resume = []
+            for channel in self._paused_channels:
+                # Don't resume the pause audio channel
+                if channel != self._pause_audio_channel:
+                    channels_to_resume.append(channel)
+                    channel.unpause()
+            
+            # Update our tracking to only include channels we actually resumed
+            self._paused_channels.clear()
+        except Exception:
+            pass
 
     def get_current_music_type(self):
         """Get the type of music currently loaded ('menu', 'ingame', or None)."""

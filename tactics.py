@@ -19,7 +19,7 @@ class TacticsManager:
                     (FIELD_WIDTH * 0.22, FIELD_HEIGHT * 0.2),  # Defender 1 (wide)
                     (FIELD_WIDTH * 0.22, FIELD_HEIGHT * 0.5),  # Defender 2 (center)
                     (FIELD_WIDTH * 0.22, FIELD_HEIGHT * 0.8),  # Defender 3 (wide)
-                    (FIELD_WIDTH * 0.38, FIELD_HEIGHT * 0.5),  # Lone Forward
+                    (FIELD_WIDTH * 0.35, FIELD_HEIGHT * 0.5),  # Lone Forward
                 ]
             },
             'offensive': {
@@ -28,8 +28,8 @@ class TacticsManager:
                     (FIELD_WIDTH * 0.1, FIELD_HEIGHT * 0.5),   # Goalkeeper
                     (FIELD_WIDTH * 0.25, FIELD_HEIGHT * 0.3),  # Defender 1
                     (FIELD_WIDTH * 0.25, FIELD_HEIGHT * 0.7),  # Defender 2
-                    (FIELD_WIDTH * 0.47, FIELD_HEIGHT * 0.25), # Forward 1 (adjusted to stay in own half)
-                    (FIELD_WIDTH * 0.47, FIELD_HEIGHT * 0.75), # Forward 2 (adjusted to stay in own half)
+                    (FIELD_WIDTH * 0.425, FIELD_HEIGHT * 0.25), # Forward 1 (adjusted to stay in own half)
+                    (FIELD_WIDTH * 0.425, FIELD_HEIGHT * 0.75), # Forward 2 (adjusted to stay in own half)
                 ]
             },
             'balanced': {
@@ -449,89 +449,6 @@ class TacticsManager:
                     })
         
         return invalid_tactics
-    
-    def rescale_prebuilt_tactic(self, tactic_key):
-        """Attempt to rescale a prebuilt tactic to make it valid"""
-        if tactic_key not in self.prebuilt_tactics:
-            return False
-        
-        tactic = self.prebuilt_tactics[tactic_key]
-        
-        # Create copies for rescaling
-        original_positions = [pos for pos in tactic['positions']]
-        
-        # Get ball positions to avoid
-        ball_positions = self.get_ball_positions()
-        
-        # Try different approaches
-        for attempt in range(5):
-            team1_positions = [list(pos) for pos in original_positions]
-            
-            # Strategy: Move players away from ball positions if they're too close
-            for ball_info in ball_positions:
-                bx, by = ball_info['position']
-                safe_distance = ball_info['radius'] + PLAYER_RADIUS + 15  # Extra margin
-                
-                # Check team 1 players
-                for i, pos in enumerate(team1_positions):
-                    px, py = pos
-                    distance = math.sqrt((px - bx)**2 + (py - by)**2)
-                    
-                    if distance < safe_distance:
-                        # Move player away from ball position
-                        new_x, new_y = px, py  # Default values
-                        
-                        if bx == FIELD_WIDTH / 2:  # Center ball position
-                            # Move toward team's goal
-                            if px < bx:  # Team 1 side
-                                new_x = px - (safe_distance - distance + 20)
-                            else:  # Move toward team 1 side
-                                new_x = px - (safe_distance - distance + 20)
-                        else:
-                            # Move away from ball
-                            dx = px - bx
-                            dy = py - by
-                            if dx == 0 and dy == 0:
-                                dx, dy = 20, 0  # Default direction
-                            length = math.sqrt(dx*dx + dy*dy)
-                            if length > 0:
-                                dx /= length
-                                dy /= length
-                                new_x = bx + dx * safe_distance
-                                new_y = by + dy * safe_distance
-                        
-                        # Apply movement with clamping
-                        margin = PLAYER_RADIUS + 10
-                        team1_positions[i][0] = max(margin, min(FIELD_WIDTH - margin, new_x))
-                        team1_positions[i][1] = max(margin, min(FIELD_HEIGHT - margin, new_y))
-            
-            # Convert back to tuples
-            scaled_team1 = [(pos[0], pos[1]) for pos in team1_positions]
-            # Generate team2 positions by mirroring
-            scaled_team2 = self.mirror_positions_for_team2(scaled_team1)
-            
-            # Test if this version is valid
-            ball_conflicts = self.check_player_ball_conflicts(scaled_team1, scaled_team2)
-            player_collisions = self.check_player_collisions(scaled_team1, scaled_team2)
-            
-            if not ball_conflicts and not player_collisions:
-                # Update the tactic with adjusted positions
-                self.prebuilt_tactics[tactic_key]['positions'] = scaled_team1
-                return True
-            
-            # If still conflicts, try adding some randomization
-            import random
-            for i in range(len(team1_positions)):
-                if i > 0:  # Don't move goalkeeper
-                    team1_positions[i][0] += random.uniform(-15, 15)
-                    team1_positions[i][1] += random.uniform(-15, 15)
-                    
-                    # Clamp to bounds
-                    margin = PLAYER_RADIUS + 10
-                    team1_positions[i][0] = max(margin, min(FIELD_WIDTH - margin, team1_positions[i][0]))
-                    team1_positions[i][1] = max(margin, min(FIELD_HEIGHT - margin, team1_positions[i][1]))
-        
-        return False
     
     def remove_invalid_custom_tactics(self, invalid_tactics):
         """Remove invalid custom tactics"""

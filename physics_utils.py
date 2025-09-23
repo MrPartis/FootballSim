@@ -13,9 +13,9 @@ from constants import (
     CORNER_REPEL_IMPULSE,
 )
 
-# Cache for expensive calculations
-_distance_cache = {}
+# Reduced cache sizes for memory optimization
 _velocity_cache = {}
+_MAX_CACHE_SIZE = 50  # Smaller cache to reduce memory usage
 
 def clamp_velocity(obj):
     """
@@ -29,8 +29,8 @@ def clamp_velocity(obj):
     else:
         speed_sq = obj.vx * obj.vx + obj.vy * obj.vy
         _velocity_cache[vel_key] = speed_sq
-        # Clear cache if it gets too large
-        if len(_velocity_cache) > 100:
+        # Clear cache if it gets too large (optimized size)
+        if len(_velocity_cache) > _MAX_CACHE_SIZE:
             _velocity_cache.clear()
     
     if speed_sq > MAX_VELOCITY * MAX_VELOCITY:

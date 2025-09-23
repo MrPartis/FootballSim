@@ -39,6 +39,11 @@ class GameManager:
         self.singleplayer = DEFAULT_SINGLEPLAYER
         self.bot_team = BOT_TEAM
         self.bot_difficulty = BOT_DEFAULT_DIFFICULTY
+        
+        # Game configuration options
+        self.game_mode = 'goals_only'  # 'goals_only', 'turns_only', 'both'
+        self.max_goals = 5  # First to reach this many goals wins (1-50)
+        self.max_turns_limit = 50  # Game ends after this many turns (10-200)
 
         # Scores
         self.team1_score = 0
@@ -51,7 +56,7 @@ class GameManager:
         
         # Turn management - Queue-based system
         self.turn_number = 1
-        self.max_turns = 50  # Game ends after 50 turns
+        self.max_turns = self.max_turns_limit  # Game ends based on configuration
         self.turn_queue = [1, 2]  # Teams in order they should play
         self.queue_index = 0  # Current position in queue
         self.teams_played_this_turn = set()  # Track who has played in current turn
@@ -77,6 +82,10 @@ class GameManager:
         self.camera_zoom = 1.0  # Current zoom level
         self.camera_center_x = SCREEN_WIDTH // 2  # Camera center X
         self.camera_center_y = SCREEN_HEIGHT // 2  # Camera center Y
+        
+        # Pause-aware timing for animations
+        self.pause_start_time = 0  # When pause started
+        self.total_pause_duration = 0  # Total time spent paused for current animation
         
         # Animation phases and timings (in milliseconds)
         self.ZOOM_IN_DURATION = 50      # Zoom to 500% in 50ms
@@ -105,28 +114,36 @@ class GameManager:
         self._show_invalid_tactics_dialog = False
         self._invalid_tactics_list = []
         self._validation_performed = False
+        self._show_reset_all_confirmation = False
+        self._show_delete_confirmation = False
         
         # AI timers
-        # Bot think time; will be adjusted by difficulty
         self._bot_action_cooldown_ms = BOT_THINK_MS.get(self.bot_difficulty, 350)
         self._last_bot_action = 0
 
-        # Menu state (logical items; 'Start' is not part of navigation)
+        # Menu state
         self._menu_items = [
             ("Mode", None),
-            ("Bot Team", None),
+            ("Bot Team", None), 
             ("Difficulty", None),
+            ("Game Mode", None),
+            ("Goal Limit", None),
+            ("Turn Limit", None)
         ]
         self._menu_index = 0
         
+        # Key repeat delay system for menu navigation
+        # Note: pygame.key.set_repeat() handles the basic repeat, these delays prevent excessive speed
+        self._key_repeat_delay = 60  # Milliseconds between key repeats (reduced since pygame handles initial delay)
+        self._fast_key_repeat_delay = 40  # Faster repeat for value changes
+        self._last_navigation_time = 0  # Last time a navigation key was pressed
+        self._last_value_change_time = 0  # Last time a value change key was pressed
+        
         # Tactics selection state
         self._tactics_phase = 'select'  # 'select' or 'custom'
-        self._tactics_team = 1  # Which team is currently selecting
-        self._tactics_index = 0  # Current selection index
+        self._tactics_team = 1
+        self._tactics_index = 0
         self._available_tactics = []
-        self._show_save_confirmation = False  # For custom tactics save confirmation
-        self._show_reset_all_confirmation = False  # For reset all custom tactics confirmation
-        self._show_delete_confirmation = False  # For delete custom tactic confirmation
 
         # UI/aim state
         self._aim_seeded = False  # ensures arrow initially points to ball before deciding
@@ -142,6 +159,42 @@ class GameManager:
         self.coin_flip_winner_determined = False
         self.coin_flip_result_display_time = 0  # When to stop showing result
         
+    def start_pause_timing(self):
+        """Called when game enters pause state during animations"""
+        self.pause_start_time = pygame.time.get_ticks()
+        # Note: Sound pausing is handled in main.py to ensure correct order
+    
+    def end_pause_timing(self):
+        """Called when game exits pause state during animations"""
+        if self.pause_start_time > 0:
+            pause_duration = pygame.time.get_ticks() - self.pause_start_time
+            
+            # Add to goal animation pause tracking
+            if self.goal_animation_active:
+                self.total_pause_duration += pause_duration
+            
+            # Note: goal_banner_until is now handled directly in banner display logic
+            # to freeze the banner during pause without time manipulation
+                
+            self.pause_start_time = 0
+            
+        # Note: Sound resuming is handled in main.py to ensure correct order
+    
+    def get_animation_elapsed_time(self):
+        """Get elapsed time for animations, excluding pause time"""
+        current_time = pygame.time.get_ticks()
+        raw_elapsed = current_time - self.goal_animation_start_time
+        
+        # Subtract total pause duration
+        adjusted_elapsed = raw_elapsed - self.total_pause_duration
+        
+        # If currently paused, also subtract current pause duration
+        if self.pause_start_time > 0:
+            current_pause_duration = current_time - self.pause_start_time
+            adjusted_elapsed -= current_pause_duration
+            
+        return max(0, adjusted_elapsed)  # Never negative
+    
     def update_music(self):
         """Update background music based on current game state."""
         # Determine what music should be playing
@@ -200,7 +253,7 @@ class GameManager:
                 total_width += surface.get_width()
             
             # Cache for future use (limit cache size to prevent memory leaks)
-            if len(self._text_cache) < 50:
+            if len(self._text_cache) < 20:  # Reduced cache size for memory optimization
                 self._text_cache[cache_key] = (rendered_segments, total_width)
         
         # Calculate starting x position
@@ -239,6 +292,10 @@ class GameManager:
         self.goal_animation_start_time = pygame.time.get_ticks()
         self.goal_animation_ball_pos = (ball_x, ball_y)
         self.animation_phase = 1  # Start with zoom in
+        
+        # Reset pause timing for new animation
+        self.total_pause_duration = 0
+        self.pause_start_time = 0
         
         # Store goal-moment positions (where objects are when goal was scored)
         self.goal_moment_player_positions = []
@@ -279,8 +336,8 @@ class GameManager:
         if not self.goal_animation_active:
             return
         
-        current_time = pygame.time.get_ticks()
-        elapsed = current_time - self.goal_animation_start_time
+        # Use pause-aware elapsed time
+        elapsed = self.get_animation_elapsed_time()
         
         if self.animation_phase == 1:  # Zoom in phase
             if elapsed <= self.ZOOM_IN_DURATION:
@@ -313,6 +370,9 @@ class GameManager:
                 self.camera_zoom = 1.0
                 self.camera_center_x = SCREEN_WIDTH // 2
                 self.camera_center_y = SCREEN_HEIGHT // 2
+                # Reset pause timing for next animation
+                self.total_pause_duration = 0
+                self.pause_start_time = 0
     
     def update_position_reset_animation(self, t):
         """Smoothly animate all objects from goal-moment positions to kickoff positions with physics disabled"""
@@ -618,6 +678,14 @@ class GameManager:
     
     def update(self):
         """Update game state"""
+        # CRITICAL: No game logic should run during pause
+        if self.game_state == GAME_STATE_PAUSED:
+            return
+            
+        # CRITICAL: No game logic should run during game over
+        if self.game_state == GAME_STATE_GAME_OVER:
+            return
+            
         if self.game_state == GAME_STATE_MENU:
             return
         elif self.game_state == GAME_STATE_TACTICS:
@@ -628,7 +696,7 @@ class GameManager:
             self.update_coin_flip()
             return
             
-        # Update goal animation if active
+        # Update goal animation if active (only when not paused)
         self.update_goal_animation()
         
         # Block all other operations during goal animation
@@ -637,10 +705,15 @@ class GameManager:
             
         # Handle transient goal banner pause
         if self.goal_banner_until:
-            if pygame.time.get_ticks() >= self.goal_banner_until:
-                self.goal_banner_until = 0
-                # After banner, resume normal play
+            # Don't update banner timing during pause - freeze the banner
+            if self.game_state != GAME_STATE_PAUSED:
+                if pygame.time.get_ticks() >= self.goal_banner_until:
+                    self.goal_banner_until = 0
+                    # After banner, resume normal play
+                else:
+                    return
             else:
+                # During pause, keep the banner frozen
                 return
 
         if self.game_state != GAME_STATE_PLAYING:
@@ -699,11 +772,12 @@ class GameManager:
             for _ in range(PHYSICS_SOLVER_ITERATIONS):
                 for p1, p2 in collision_pairs:
                     if resolve_circle_circle(p1, p2):
-                        # Create unique collision pair ID
-                        pair_id = (id(p1), id(p2)) if id(p1) < id(p2) else (id(p2), id(p1))
-                        if pair_id not in self.active_collisions:
-                            self.active_collisions.add(pair_id)
-                            self.sounds.play_collision()
+                        # Efficient collision tracking with size limit
+                        pair_id = (min(id(p1), id(p2)), max(id(p1), id(p2)))
+                        if len(self.active_collisions) < 20:  # Limit collision tracking
+                            if pair_id not in self.active_collisions:
+                                self.active_collisions.add(pair_id)
+                                self.sounds.play_collision()
         
             # Update ball physics FIRST (with boundary checking)
             self.ball.update(speed_multiplier)
@@ -728,11 +802,12 @@ class GameManager:
                         
                     if resolve_circle_circle(self.ball, p):
                         collision_resolved = True
-                        # Create unique collision pair ID
-                        pair_id = (id(self.ball), id(p))
-                        if pair_id not in self.active_collisions:
-                            self.active_collisions.add(pair_id)
-                            self.sounds.play_collision()
+                        # Optimized collision tracking with size limit
+                        if len(self.active_collisions) < 20:  # Limit collision tracking for memory
+                            pair_id = (id(self.ball), id(p))
+                            if pair_id not in self.active_collisions:
+                                self.active_collisions.add(pair_id)
+                                self.sounds.play_collision()
                         
                         # Additional safety: ensure ball doesn't clip through player
                         dx = self.ball.x - p.x
@@ -837,9 +912,22 @@ class GameManager:
         # Show goal banner for a short time
         self.goal_banner_until = pygame.time.get_ticks() + GOAL_BANNER_MS
         
-        # Check for game end
-        if self.team1_score >= 5 or self.team2_score >= 5:
+        # Check for game end based on configured game mode
+        goal_limit_reached = (self.team1_score >= self.max_goals or self.team2_score >= self.max_goals)
+        
+        if self.game_mode == 'goals_only' and goal_limit_reached:
             self.game_state = GAME_STATE_GAME_OVER
+            # Stop any ongoing animations when game ends, but keep the winning goal banner
+            self.goal_animation_active = False
+            # Don't clear goal_banner_until - let the winning goal banner show
+            self.force_meter_active = False
+            self.update_music()
+        elif self.game_mode == 'both' and goal_limit_reached:
+            self.game_state = GAME_STATE_GAME_OVER
+            # Stop any ongoing animations when game ends, but keep the winning goal banner
+            self.goal_animation_active = False
+            # Don't clear goal_banner_until - let the winning goal banner show
+            self.force_meter_active = False
             self.update_music()
     
     def end_current_turn(self):
@@ -861,9 +949,24 @@ class GameManager:
             self.queue_index = 0
             self.teams_played_this_turn.clear()
             
-            # Check for game end
-            if self.turn_number > self.max_turns:
+            # Check for game end based on configured game mode
+            turn_limit_reached = self.turn_number > self.max_turns
+            
+            if self.game_mode == 'turns_only' and turn_limit_reached:
                 self.game_state = GAME_STATE_GAME_OVER
+                # Stop any ongoing animations when game ends
+                self.goal_animation_active = False
+                # Don't clear goal_banner_until - preserve any active banner
+                self.force_meter_active = False
+                self.update_music()
+                return
+            elif self.game_mode == 'both' and turn_limit_reached:
+                self.game_state = GAME_STATE_GAME_OVER
+                # Stop any ongoing animations when game ends
+                self.goal_animation_active = False
+                # Don't clear goal_banner_until - preserve any active banner
+                self.force_meter_active = False
+                self.update_music()
                 return
         
         # Set next team from queue
@@ -898,6 +1001,11 @@ class GameManager:
             elif self.coin_flip_winner_determined:
                 self._actually_start_game()
             return
+        elif self.game_state == GAME_STATE_GAME_OVER:
+            # Handle game over state - only allow specific keys
+            if key == pygame.K_m:  # M key to return to menu with preserved config
+                self.return_to_menu_with_config()
+            return
         
         if self.game_state != GAME_STATE_PLAYING:
             return
@@ -931,37 +1039,83 @@ class GameManager:
             if key == controls['action']:
                 self.execute_player_movement()
 
+    def _can_repeat_key(self, key_type='navigation'):
+        """Check if enough time has passed since last key repeat for smooth but not spammy navigation"""
+        current_time = pygame.time.get_ticks()
+        if key_type == 'navigation':
+            return current_time - self._last_navigation_time >= self._key_repeat_delay
+        elif key_type == 'value_change':
+            return current_time - self._last_value_change_time >= self._fast_key_repeat_delay
+        return True
+    
+    def _update_key_repeat_time(self, key_type='navigation'):
+        """Update the last key repeat time for the specified key type"""
+        current_time = pygame.time.get_ticks()
+        if key_type == 'navigation':
+            self._last_navigation_time = current_time
+        elif key_type == 'value_change':
+            self._last_value_change_time = current_time
+
     def handle_menu_keypress(self, key):
-        # Navigate
+        # Navigate with key repeat delay
         if key in (pygame.K_UP, pygame.K_w):
-            self._menu_index = self._prev_enabled_index(self._menu_index)
+            if self._can_repeat_key('navigation'):
+                self._menu_index = self._prev_enabled_index(self._menu_index)
+                self._update_key_repeat_time('navigation')
             return
         if key in (pygame.K_DOWN, pygame.K_s):
-            self._menu_index = self._next_enabled_index(self._menu_index)
+            if self._can_repeat_key('navigation'):
+                self._menu_index = self._next_enabled_index(self._menu_index)
+                self._update_key_repeat_time('navigation')
             return
 
-        # Adjust values for current selection
-        if self._menu_index == 0 and key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_a, pygame.K_d):
-            # Toggle mode
-            self.singleplayer = not self.singleplayer
-            return
-        if self._menu_index == 1 and self.singleplayer and key in (pygame.K_LEFT, pygame.K_a):
-            self.bot_team = 1 if self.bot_team == 2 else 2
-            return
-        if self._menu_index == 1 and self.singleplayer and key in (pygame.K_RIGHT, pygame.K_d):
-            self.bot_team = 2 if self.bot_team == 1 else 1
-            return
-        if self._menu_index == 2 and self.singleplayer and key in (pygame.K_LEFT, pygame.K_a, pygame.K_RIGHT, pygame.K_d):
-            order = ["easy", "medium", "hard"]
-            idx = order.index(self.bot_difficulty) if self.bot_difficulty in order else 1
-            if key in (pygame.K_LEFT, pygame.K_a):
-                idx = (idx - 1) % len(order)
-            else:
-                idx = (idx + 1) % len(order)
-            self.bot_difficulty = order[idx]
-            # Adjust bot think time according to difficulty
-            self._bot_action_cooldown_ms = BOT_THINK_MS.get(self.bot_difficulty, self._bot_action_cooldown_ms)
-            return
+        # Adjust values for current selection with faster key repeat delay
+        if key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_a, pygame.K_d):
+            if not self._can_repeat_key('value_change'):
+                return  # Too soon, ignore this key press
+            
+            self._update_key_repeat_time('value_change')
+            
+            if self._menu_index == 0:  # Mode
+                self.singleplayer = not self.singleplayer
+                return
+            elif self._menu_index == 1 and self.singleplayer:  # Bot Team
+                self.bot_team = 1 if self.bot_team == 2 else 2
+                return
+            elif self._menu_index == 2 and self.singleplayer:  # Difficulty
+                order = ["easy", "medium", "hard"]
+                idx = order.index(self.bot_difficulty) if self.bot_difficulty in order else 1
+                if key in (pygame.K_LEFT, pygame.K_a):
+                    idx = (idx - 1) % len(order)
+                else:
+                    idx = (idx + 1) % len(order)
+                self.bot_difficulty = order[idx]
+                # Adjust bot think time according to difficulty
+                self._bot_action_cooldown_ms = BOT_THINK_MS.get(self.bot_difficulty, self._bot_action_cooldown_ms)
+                return
+            elif self._menu_index == 3:  # Game Mode
+                modes = ["goals_only", "turns_only", "both"]
+                idx = modes.index(self.game_mode) if self.game_mode in modes else 0
+                if key in (pygame.K_LEFT, pygame.K_a):
+                    idx = (idx - 1) % len(modes)
+                else:
+                    idx = (idx + 1) % len(modes)
+                self.game_mode = modes[idx]
+                return
+            elif self._menu_index == 4 and self.game_mode in ['goals_only', 'both']:  # Goal Limit
+                if key in (pygame.K_LEFT, pygame.K_a):
+                    self.max_goals = max(1, self.max_goals - 1)
+                else:
+                    self.max_goals = min(50, self.max_goals + 1)
+                return
+            elif self._menu_index == 5 and self.game_mode in ['turns_only', 'both']:  # Turn Limit
+                if key in (pygame.K_LEFT, pygame.K_a):
+                    self.max_turns_limit = max(10, self.max_turns_limit - 10)
+                else:
+                    self.max_turns_limit = min(200, self.max_turns_limit + 10)
+                # Update the current max_turns as well
+                self.max_turns = self.max_turns_limit
+                return
 
         # Start the game (Enter/Space) from any item
         if key in (pygame.K_RETURN, pygame.K_SPACE):
@@ -972,11 +1126,17 @@ class GameManager:
             return
 
     def _menu_item_enabled(self, idx: int) -> bool:
-        # idx: 0 Mode, 1 Bot Team, 2 Difficulty
-        if idx == 0:
+        # idx: 0 Mode, 1 Bot Team, 2 Difficulty, 3 Game Mode, 4 Goal Limit, 5 Turn Limit
+        if idx == 0:  # Mode
             return True
-        if idx in (1, 2):
+        elif idx in (1, 2):  # Bot Team, Difficulty
             return self.singleplayer
+        elif idx == 3:  # Game Mode
+            return True
+        elif idx == 4:  # Goal Limit
+            return self.game_mode in ['goals_only', 'both']
+        elif idx == 5:  # Turn Limit
+            return self.game_mode in ['turns_only', 'both']
         return True
 
     def _next_enabled_index(self, current: int) -> int:
@@ -1014,39 +1174,26 @@ class GameManager:
             self._tactics_team = 2  # Move to next team
     
     def _validate_all_tactics(self):
-        """Validate all tactics and handle invalid ones"""
+        """Validate all tactics and handle invalid ones.
+        
+        This method will:
+        1. Check all tactics for validation issues
+        2. Remove invalid custom tactics that can't be fixed
+        """
         invalid_tactics = self.tactics_manager.validate_all_tactics()
         
         if invalid_tactics:
-            # Try to rescale invalid prebuilt tactics
-            rescaled_tactics = []
-            remaining_invalid = []
-            
-            for invalid in invalid_tactics:
-                if invalid['type'] == 'prebuilt':
-                    # Try to rescale prebuilt tactic
-                    if self.tactics_manager.rescale_prebuilt_tactic(invalid['key']):
-                        rescaled_tactics.append(invalid['name'])
-                    else:
-                        remaining_invalid.append(invalid)
-                else:
-                    # Custom tactics cannot be rescaled, mark for removal
-                    remaining_invalid.append(invalid)
-            
             # Remove invalid custom tactics
-            if remaining_invalid:
-                removed_count = self.tactics_manager.remove_invalid_custom_tactics(remaining_invalid)
-                
-                # Update available tactics list
-                self._available_tactics = self.tactics_manager.get_available_tactics()
-                
-                # Store invalid tactics for dialog display
-                self._invalid_tactics_list = remaining_invalid
-                self._show_invalid_tactics_dialog = True
+            removed_count = self.tactics_manager.remove_invalid_custom_tactics(invalid_tactics)
             
-            # Log rescaled tactics (if any)
-            if rescaled_tactics:
-                print(f"Rescaled invalid prebuilt tactics: {', '.join(rescaled_tactics)}")
+            # Update available tactics list
+            self._available_tactics = self.tactics_manager.get_available_tactics()
+            
+            # Store invalid tactics for dialog display
+            self._invalid_tactics_list = invalid_tactics
+            self._show_invalid_tactics_dialog = True
+    
+
     
     def handle_tactics_keypress(self, key):
         """Handle keyboard input during tactics selection"""
@@ -1097,15 +1244,23 @@ class GameManager:
                     delattr(self, '_delete_tactic_key')
             return
         
-        # Grid navigation (5x2 layout)
+        # Grid navigation (5x2 layout) with key repeat delay
         if key in (pygame.K_UP, pygame.K_w):
-            self._tactics_index = self._get_grid_navigation(self._tactics_index, 'up')
+            if self._can_repeat_key('navigation'):
+                self._tactics_index = self._get_grid_navigation(self._tactics_index, 'up')
+                self._update_key_repeat_time('navigation')
         elif key in (pygame.K_DOWN, pygame.K_s):
-            self._tactics_index = self._get_grid_navigation(self._tactics_index, 'down')
+            if self._can_repeat_key('navigation'):
+                self._tactics_index = self._get_grid_navigation(self._tactics_index, 'down')
+                self._update_key_repeat_time('navigation')
         elif key in (pygame.K_LEFT, pygame.K_a):
-            self._tactics_index = self._get_grid_navigation(self._tactics_index, 'left')
+            if self._can_repeat_key('navigation'):
+                self._tactics_index = self._get_grid_navigation(self._tactics_index, 'left')
+                self._update_key_repeat_time('navigation')
         elif key in (pygame.K_RIGHT, pygame.K_d):
-            self._tactics_index = self._get_grid_navigation(self._tactics_index, 'right')
+            if self._can_repeat_key('navigation'):
+                self._tactics_index = self._get_grid_navigation(self._tactics_index, 'right')
+                self._update_key_repeat_time('navigation')
         
         # Selection
         elif key in (pygame.K_RETURN, pygame.K_SPACE):
@@ -1243,6 +1398,7 @@ class GameManager:
                 self.update_music()
 
     def _is_bot_turn(self):
+        # Inline optimization for frequently called method
         return self.singleplayer and self.current_team == self.bot_team
 
     def _bot_context(self):
@@ -1552,19 +1708,26 @@ class GameManager:
         
         # Team scores with colored team names
         score_segments = [
-            ("Team 1 ", TEAM1_COLOR),  # Blue
+            ("Team 1   ", TEAM1_COLOR),  # Blue
             (str(self.team1_score), WHITE),
             (" - ", WHITE),
             (str(self.team2_score), WHITE),
-            (" Team 2", TEAM2_COLOR)   # Red
+            ("   Team 2", TEAM2_COLOR)   # Red
         ]
         self.render_multicolor_text(screen, score_segments, SCOREBOARD_HEIGHT // 2 - 10, SCREEN_WIDTH // 2)
         
         # Turn indicator with colored current team
-        turn_segments = [
+        # Show turn number and team, with turn limit if applicable
+        if self.game_mode in ['turns_only', 'both']:
+            turn_segments = [
+            (f"Turn: {self.turn_number}/{self.max_turns_limit} | ", WHITE),
+            (f"Team {self.current_team}'s turn", WHITE)
+            ]
+        else:
+            turn_segments = [
             (f"Turn: {self.turn_number} | ", WHITE),
             (f"Team {self.current_team}'s turn", WHITE)
-        ]
+            ]
         current_x = 10
         for text, color in turn_segments:
             turn_surface = self.small_font.render(text, True, color)
@@ -1651,7 +1814,7 @@ class GameManager:
         screen.blit(final_score, score_rect)
         
         # Restart instruction
-        restart_text = self.small_font.render("Press R to restart or ESC to quit", True, WHITE)
+        restart_text = self.small_font.render("Press R to restart • M for menu • ESC to quit", True, WHITE)
         restart_rect = restart_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 60))
         screen.blit(restart_text, restart_rect)
     
@@ -1676,10 +1839,65 @@ class GameManager:
             return 'end_2p'
     
     def restart_game(self):
-        """Restart the game"""
+        """Restart the game while preserving user configuration settings"""
+        # Save current configuration settings
+        saved_config = {
+            'singleplayer': self.singleplayer,
+            'bot_team': self.bot_team,
+            'bot_difficulty': self.bot_difficulty,
+            'game_mode': self.game_mode,
+            'max_goals': self.max_goals,
+            'max_turns_limit': self.max_turns_limit
+        }
+        
+        # Reset game state
         self.__init__()
+        
+        # Restore user configuration
+        self.singleplayer = saved_config['singleplayer']
+        self.bot_team = saved_config['bot_team']
+        self.bot_difficulty = saved_config['bot_difficulty']
+        self.game_mode = saved_config['game_mode']
+        self.max_goals = saved_config['max_goals']
+        self.max_turns_limit = saved_config['max_turns_limit']
+        
+        # Update dependent settings
+        self.max_turns = self.max_turns_limit
+        self._bot_action_cooldown_ms = BOT_THINK_MS.get(self.bot_difficulty, self._bot_action_cooldown_ms)
+        
         # Note: _music_initialized is set to False in __init__, 
         # so music will start on the next update() call
+    
+    def return_to_menu_with_config(self):
+        """Return to menu while preserving user configuration settings"""
+        # Save current configuration settings
+        saved_config = {
+            'singleplayer': self.singleplayer,
+            'bot_team': self.bot_team,
+            'bot_difficulty': self.bot_difficulty,
+            'game_mode': self.game_mode,
+            'max_goals': self.max_goals,
+            'max_turns_limit': self.max_turns_limit
+        }
+        
+        # Reset game state
+        self.__init__()
+        
+        # Restore user configuration
+        self.singleplayer = saved_config['singleplayer']
+        self.bot_team = saved_config['bot_team']
+        self.bot_difficulty = saved_config['bot_difficulty']
+        self.game_mode = saved_config['game_mode']
+        self.max_goals = saved_config['max_goals']
+        self.max_turns_limit = saved_config['max_turns_limit']
+        
+        # Update dependent settings
+        self.max_turns = self.max_turns_limit
+        self._bot_action_cooldown_ms = BOT_THINK_MS.get(self.bot_difficulty, self._bot_action_cooldown_ms)
+        
+        # Set game state to menu
+        self.game_state = GAME_STATE_MENU
+        self.update_music()
     
     def draw(self, screen):
         """Draw everything"""
@@ -1715,6 +1933,39 @@ class GameManager:
             screen.fill(BLACK)
             self.draw_coin_flip(screen)
             return
+        elif self.game_state == GAME_STATE_GAME_OVER:
+            # Game over state - keep playground rendered to show how the winning goal was scored
+            # Get camera transformation
+            zoom, offset_x, offset_y = self.get_camera_transform()
+            
+            if zoom != 1.0:
+                # Create a temporary surface for zoom transformation
+                temp_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+                temp_surface.fill(BLACK)
+                
+                # Draw everything to temp surface with camera transformation
+                self.draw_game_world(temp_surface, zoom, offset_x, offset_y)
+                
+                # Blit the transformed surface to the main screen
+                screen.blit(temp_surface, (0, 0))
+            else:
+                # No zoom, draw normally
+                self.draw_game_world(screen, 1.0, 0, 0)
+            
+            # Always draw UI elements (scoreboard, etc.) without camera transformation
+            self.draw_scoreboard(screen)
+            
+            # Show goal banner if it was active when the game ended
+            if self.goal_banner_until and pygame.time.get_ticks() < self.goal_banner_until:
+                # Remove backlit background - no overlay
+                banner_font = pygame.font.Font(None, 72)
+                text = banner_font.render("GAME!!!", True, YELLOW)
+                rect = text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 200))
+                screen.blit(text, rect)
+            
+            # Draw game over overlay on top of the playground
+            self.draw_game_over(screen)
+            return
             
         # Get camera transformation
         zoom, offset_x, offset_y = self.get_camera_transform()
@@ -1738,16 +1989,15 @@ class GameManager:
         self.draw_force_meter(screen)
         
         # Goal notification banner overlay
-        if self.goal_banner_until and pygame.time.get_ticks() < self.goal_banner_until:
-            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-            overlay.fill((0, 0, 0, 100))
-            screen.blit(overlay, (0, 0))
+        if self.goal_banner_until and (
+            (self.game_state != GAME_STATE_PAUSED and pygame.time.get_ticks() < self.goal_banner_until) or
+            (self.game_state == GAME_STATE_PAUSED)  # Always show during pause
+        ):
+            # Remove backlit background - no overlay
             banner_font = pygame.font.Font(None, 72)
             text = banner_font.render("GOAL!!!", True, YELLOW)
-            rect = text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 80))
+            rect = text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 200))
             screen.blit(text, rect)
-        
-        self.draw_game_over(screen)
     
     def draw_game_world(self, surface, zoom, offset_x, offset_y):
         """Draw the game world (field, players, ball) with camera transformation"""
@@ -1818,24 +2068,39 @@ class GameManager:
     def draw_menu(self, screen):
         title_font = pygame.font.Font(None, 64)
         item_font = pygame.font.Font(None, 36)
+        small_font = pygame.font.Font(None, 24)
 
         title = title_font.render("Mini Football", True, WHITE)
-        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 140))
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 120))
         screen.blit(title, title_rect)
 
         # Compose values
-        mode_val = "Singleplayer" if self.singleplayer else "Two Players"
+        mode_val = "Singleplayer" if self.singleplayer else "Multiplayer"
         bot_team_val = f"Team {self.bot_team}"
         difficulty_val = self.bot_difficulty.capitalize()
+        
+        # Game mode descriptions
+        game_mode_names = {
+            'goals_only': 'Goals Only',
+            'turns_only': 'Turns Only', 
+            'both': 'Goals & Turns'
+        }
+        game_mode_val = game_mode_names.get(self.game_mode, 'Goals Only')
+        
+        goal_limit_val = f"{self.max_goals} goal{'s' if self.max_goals != 1 else ''}"
+        turn_limit_val = f"{self.max_turns_limit} turns"
 
         items = [
             ("Mode", mode_val),
             ("Bot Team", bot_team_val),
             ("Difficulty", difficulty_val),
+            ("Game Mode", game_mode_val),
+            ("Goal Limit", goal_limit_val),
+            ("Turn Limit", turn_limit_val),
         ]
 
-        start_y = 220
-        gap = 44
+        start_y = 180
+        gap = 40
         for i, (label, val) in enumerate(items):
             is_sel = (i == self._menu_index)
             enabled = self._menu_item_enabled(i)
@@ -1843,14 +2108,30 @@ class GameManager:
             color = YELLOW if (is_sel and enabled) else base_color
             label_surf = item_font.render(f"{label}", True, color)
             val_surf = item_font.render(f"{val}", True, color)
-            lx = SCREEN_WIDTH // 2 - 180
-            vx = SCREEN_WIDTH // 2 + 60
+            lx = SCREEN_WIDTH // 2 - 200
+            vx = SCREEN_WIDTH // 2 + 80
             y = start_y + i * gap
             screen.blit(label_surf, (lx, y))
             screen.blit(val_surf, (vx, y))
 
-        hint = self.small_font.render("Up/Down to navigate • Left/Right to change • Press Enter to start", True, LIGHT_GRAY)
-        hint_rect = hint.get_rect(center=(SCREEN_WIDTH // 2, start_y + len(items) * gap + 30))
+        # Game mode descriptions
+        desc_y = start_y + len(items) * gap + 20
+        if self.game_mode == 'goals_only':
+            desc = "First team to reach the goal limit wins"
+        elif self.game_mode == 'turns_only':
+            desc = "Team with most goals after turn limit wins"
+        elif self.game_mode == 'both':
+            desc = "First to reach goal limit OR most goals after turn limit"
+        else:
+            desc = ""
+        
+        if desc:
+            desc_surf = small_font.render(desc, True, LIGHT_GRAY)
+            desc_rect = desc_surf.get_rect(center=(SCREEN_WIDTH // 2, desc_y))
+            screen.blit(desc_surf, desc_rect)
+
+        hint = small_font.render("Up/Down to navigate • Left/Right to change • Press Enter to start", True, LIGHT_GRAY)
+        hint_rect = hint.get_rect(center=(SCREEN_WIDTH // 2, desc_y + 40))
         screen.blit(hint, hint_rect)
     
     def draw_save_confirmation(self, screen):
@@ -2272,8 +2553,14 @@ class GameManager:
     
     def draw_coin_flip(self, screen):
         """Draw the coin flip animation"""
-        # Background
-        screen.fill(BLACK)
+        # First, render the playground in the background
+        self.draw_game_world(screen, 1.0, 0, 0)
+        
+        # Add semi-transparent overlay with LIGHT_BLUE color at 40% opacity
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        light_blue_with_alpha = (*LIGHT_BLUE, int(255 * 0.4))  # 40% opacity
+        overlay.fill(light_blue_with_alpha)
+        screen.blit(overlay, (0, 0))
         
         # Title
         title_font = pygame.font.Font(None, 64)
