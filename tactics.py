@@ -138,8 +138,13 @@ class TacticsManager:
         # Fallback to balanced formation
         return self.get_tactic_positions('balanced', team)
     
-    def select_random_tactic(self, exclude_custom=True):
-        """Select a random tactic (used for bots)"""
+    def select_random_tactic(self, exclude_custom=True, avoid_tactic=None):
+        """Select a random tactic (used for bots)
+        
+        Args:
+            exclude_custom: Whether to exclude custom tactics from selection
+            avoid_tactic: Tactic key to avoid (for better bot variety)
+        """
         import random
         
         if exclude_custom:
@@ -151,6 +156,33 @@ class TacticsManager:
             for key, tactic in self.custom_tactics.items():
                 if tactic is not None:
                     tactics.append(key)
+        
+        # Remove the tactic to avoid if specified and if there are other options
+        if avoid_tactic and avoid_tactic in tactics and len(tactics) > 1:
+            tactics.remove(avoid_tactic)
+        
+        return random.choice(tactics)
+
+    def select_bot_tactic(self, opponent_team_number=None):
+        """Select a tactic for the bot, ensuring variety from the opponent
+        
+        Args:
+            opponent_team_number: Team number of the opponent (1 or 2)
+                                 If provided, will avoid their tactic for variety
+        """
+        import random
+        
+        # Get all available tactics (including custom ones)
+        tactics = list(self.prebuilt_tactics.keys())
+        for key, tactic in self.custom_tactics.items():
+            if tactic is not None:
+                tactics.append(key)
+        
+        # If opponent team specified, try to avoid their tactic for variety
+        if opponent_team_number:
+            opponent_tactic = self.get_team_tactic(opponent_team_number)
+            if opponent_tactic in tactics and len(tactics) > 1:
+                tactics.remove(opponent_tactic)
         
         return random.choice(tactics)
     

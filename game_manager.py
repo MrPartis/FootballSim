@@ -537,12 +537,10 @@ class GameManager:
     def init_players(self):
         """Initialize all players for both teams using current tactics"""
         # Get positions from tactics manager
-        team1_positions = self.tactics_manager.get_tactic_positions(
-            self.tactics_manager.get_team_tactic(1), 1
-        )
-        team2_positions = self.tactics_manager.get_tactic_positions(
-            self.tactics_manager.get_team_tactic(2), 2
-        )
+        team1_tactic = self.tactics_manager.get_team_tactic(1)
+        team2_tactic = self.tactics_manager.get_team_tactic(2)
+        team1_positions = self.tactics_manager.get_tactic_positions(team1_tactic, 1)
+        team2_positions = self.tactics_manager.get_tactic_positions(team2_tactic, 2)
         
         # Clear existing players
         self.team1_players.clear()
@@ -1295,8 +1293,10 @@ class GameManager:
         
         # Bot auto-selects tactics if it's their turn
         if self.singleplayer and self.bot_team == 1:
-            tactic_key = self.tactics_manager.select_random_tactic(exclude_custom=False)
+            # Bot goes first, so pick a random tactic (human will choose after)
+            tactic_key = self.tactics_manager.select_bot_tactic()
             self.tactics_manager.set_team_tactic(1, tactic_key)
+            self._tactics_team = 2  # Move to human's turn
             self._tactics_team = 2  # Move to next team
     
     def _validate_all_tactics(self):
@@ -1474,10 +1474,11 @@ class GameManager:
             self._tactics_team = 2
             self._tactics_index = 0
             
-            # Bot auto-selects if it's team 2
+            # Bot auto-selects if it's team 2 (ensure different from human choice)
             if self.singleplayer and self.bot_team == 2:
-                tactic_key = self.tactics_manager.select_random_tactic(exclude_custom=False)
-                self.tactics_manager.set_team_tactic(2, tactic_key)
+                # Select bot tactic while avoiding human's choice for variety
+                bot_tactic = self.tactics_manager.select_bot_tactic(opponent_team_number=1)
+                self.tactics_manager.set_team_tactic(2, bot_tactic)
                 self._start_game()
         else:
             # Both teams selected, start game
