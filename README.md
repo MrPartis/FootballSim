@@ -48,7 +48,7 @@ A turn-based football (soccer) simulation game built with Python and Pygame. Con
 - Python 3.7 or higher
 - pip (Python package installer)
 
-### Method 1: Run from Source
+### Installation & Running
 
    ```bash
    git clone https://github.com/MrPartis/FootballSim.git
@@ -57,31 +57,12 @@ A turn-based football (soccer) simulation game built with Python and Pygame. Con
    python main.py
    ```
 
-### Method 2: Build Executable (Windows)
-
-1. **Follow Method 1**
-
-2. **Run the build script**:
-   ```bash
-   build.bat
-   ```
-   
-   Or manually build with PyInstaller:
-   ```bash
-   pyinstaller --onefile --windowed --name="MiniFootball" --add-data="assets;assets" main.py
-   ```
-
-3. **Find the executable** in the `dist` folder: `dist/MiniFootball.exe`
-
-4. **Distribute** the executable - it can run on any Windows computer without Python installed
-
 ## Dependencies
 
 The game requires the following Python packages:
 
 - **pygame** (>= 2.0.0) - Game engine and graphics
 - **pillow** (>= 8.0.0) - Image processing (for animated GIFs)
-- **pyinstaller** (>= 5.0.0) - For building standalone executables
 
 All dependencies are listed in `requirements.txt` and will be installed automatically.
 
@@ -173,8 +154,7 @@ Game settings can be modified in `constants.py`:
 4. **Visual Effects**: Update rendering in respective class files
 5. **Configuration Options**: Add new persistent settings in `constants.py` with auto-save support
 
-### Building for Distribution
-Use the provided `build.bat` script on Windows, or refer to `build_instructions.txt` for detailed PyInstaller commands for other platforms.
+
 
 ## Troubleshooting
 
@@ -205,10 +185,7 @@ Use the provided `build.bat` script on Windows, or refer to `build_instructions.
 - Lower screen resolution
 - Disable sound effects temporarily
 
-**Build fails:**
-- Ensure PyInstaller is installed: `pip install pyinstaller`
-- Check that all assets are in the correct folder
-- Try building without the `--windowed` flag to see error messages
+
 
 ## License
 

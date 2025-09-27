@@ -208,8 +208,8 @@ class SoundManager:
         
         if self._pause_audio is not None:
             try:
-                # Apply volume and play with infinite loop (-1)
-                self._pause_audio.set_volume(self._apply_sfx_volume())
+                # Apply BGM volume since pause audio is background music
+                self._pause_audio.set_volume(self._apply_bgm_volume())
                 self._pause_audio_channel = self._pause_audio.play(-1)
             except Exception:
                 pass
@@ -223,7 +223,7 @@ class SoundManager:
         if self._pause_audio_channel is None or not self._pause_audio_channel.get_busy():
             # Channel stopped or was never started, restart it
             try:
-                self._pause_audio.set_volume(self._apply_sfx_volume())
+                self._pause_audio.set_volume(self._apply_bgm_volume())
                 self._pause_audio_channel = self._pause_audio.play(-1)
             except Exception:
                 pass
@@ -337,6 +337,7 @@ class SoundManager:
         
         try:
             pygame.mixer.music.load(music_file)
+            self._apply_music_volume()  # Apply volume before playing
             pygame.mixer.music.play(-1)  # Loop indefinitely
             self._current_music_type = music_type
             self._music_paused = False
@@ -437,9 +438,18 @@ class SoundManager:
         self.sfx_volume = max(0.0, min(1.0, sfx))
         self.bgm_volume = max(0.0, min(1.0, bgm))
         
-        # Apply BGM volume to current music if playing
-        if pygame.mixer.music.get_busy():
+        # Apply BGM volume to current music if playing (even if paused)
+        # This ensures volume changes take effect when music resumes
+        if pygame.mixer.music.get_busy() or self._music_paused:
             self._apply_music_volume()
+            
+        # Also update pause audio volume if it's currently playing
+        if self._pause_audio is not None and self._pause_audio_channel is not None:
+            try:
+                if self._pause_audio_channel.get_busy():
+                    self._pause_audio.set_volume(self._apply_bgm_volume())
+            except Exception:
+                pass
     
     def _apply_music_volume(self):
         """Apply the combined master and BGM volume to music."""
@@ -455,3 +465,7 @@ class SoundManager:
     def _apply_sfx_volume(self, base_volume: float = 1.0) -> float:
         """Calculate the combined master and SFX volume for sound effects."""
         return self.master_volume * self.sfx_volume * base_volume
+    
+    def _apply_bgm_volume(self, base_volume: float = 1.0) -> float:
+        """Calculate the combined master and BGM volume for background music."""
+        return self.master_volume * self.bgm_volume * base_volume

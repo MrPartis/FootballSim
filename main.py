@@ -40,6 +40,68 @@ class MiniFootballGame:
         self.pause_frame_index = 0
         self.pause_last_tick = 0
         self._load_pause_animation()
+        
+        # Pause menu state for volume controls
+        self.pause_menu_index = 0  # 0=Master Volume, 1=SFX Volume, 2=BGM Volume
+        self.show_pause_volume_controls = False
+        
+        # Key repeat timing for pause menu (matches main menu behavior)
+        self._pause_last_key_time = {'navigation': 0, 'value_change': 0}
+        self._pause_key_repeat_delay = {'navigation': 200, 'value_change': 50}  # ms
+
+    def _can_repeat_pause_key(self, key_type: str) -> bool:
+        """Check if enough time has passed to allow key repeat for pause menu"""
+        now = pygame.time.get_ticks()
+        return now - self._pause_last_key_time[key_type] >= self._pause_key_repeat_delay[key_type]
+    
+    def _update_pause_key_repeat_time(self, key_type: str):
+        """Update the last key press time for pause menu"""
+        self._pause_last_key_time[key_type] = pygame.time.get_ticks()
+
+    def _reload_audio_config(self):
+        """Reload audio configuration from storage to ensure synchronization (non-blocking)"""
+        try:
+            from config_manager import get_audio_config
+            from constants import DEFAULT_MASTER_VOLUME, DEFAULT_SFX_VOLUME, DEFAULT_BGM_VOLUME
+            
+            audio_config = get_audio_config()
+            self.game_manager.master_volume = audio_config.get('master_volume', DEFAULT_MASTER_VOLUME)
+            self.game_manager.sfx_volume = audio_config.get('sfx_volume', DEFAULT_SFX_VOLUME)
+            self.game_manager.bgm_volume = audio_config.get('bgm_volume', DEFAULT_BGM_VOLUME)
+            
+            # Apply the reloaded settings immediately
+            self.game_manager.sync_volume_settings()
+        except Exception as e:
+            # Silently continue - pause functionality shouldn't be affected by sync issues
+            print(f"Warning: Failed to reload audio configuration: {e}")
+
+    def _save_pause_config(self):
+        """Save current pause menu configuration for persistence (isolated from resume logic)"""
+        try:
+            # Save audio configuration to ensure persistence
+            self.game_manager.save_audio_configuration()
+            print(f"Configuration saved: Master={int(self.game_manager.master_volume*100)}%, SFX={int(self.game_manager.sfx_volume*100)}%, BGM={int(self.game_manager.bgm_volume*100)}%")
+        except Exception as e:
+            # Silently continue - resume functionality shouldn't be affected by save issues
+            print(f"Warning: Failed to save pause configuration: {e}")
+
+    def _adjust_pause_volume(self, delta):
+        """Adjust volume based on current pause menu selection - matches main menu behavior"""
+        if self.pause_menu_index == 0:  # Master Volume
+            self.game_manager.master_volume = max(0.0, min(1.0, self.game_manager.master_volume + delta))
+            # Apply changes immediately
+            self.game_manager.sync_volume_settings()
+            self.game_manager.save_audio_configuration()
+        elif self.pause_menu_index == 1:  # SFX Volume  
+            self.game_manager.sfx_volume = max(0.0, min(1.0, self.game_manager.sfx_volume + delta))
+            # Apply changes immediately
+            self.game_manager.sync_volume_settings()
+            self.game_manager.save_audio_configuration()
+        elif self.pause_menu_index == 2:  # BGM Volume
+            self.game_manager.bgm_volume = max(0.0, min(1.0, self.game_manager.bgm_volume + delta))
+            # Apply changes immediately
+            self.game_manager.sync_volume_settings()
+            self.game_manager.save_audio_configuration()
 
     def _load_pause_animation(self):
         """Load animated GIF for pause screen with memory optimizations.
@@ -112,8 +174,14 @@ class MiniFootballGame:
                         self.game_manager.start_pause_timing()
                         self.game_manager.game_state = GAME_STATE_PAUSED
                         self.game_manager.update_music()
+                        # Reset pause menu to first option
+                        self.pause_menu_index = 0
+                        # Reload audio configuration after pause state is set (isolated from core logic)
+                        self._reload_audio_config()
                     elif self.game_manager.game_state == GAME_STATE_PAUSED:
-                        # Resume game - Stop pause audio and resume game
+                        # Save current configuration before resuming
+                        self._save_pause_config()
+                        # Resume game - Stop pause audio and resume game (moved from ESC handler)
                         try:
                             self.game_manager.sounds.stop_pause_audio()
                             # Resume all sounds including goal effects
@@ -134,17 +202,69 @@ class MiniFootballGame:
                         # For other states (MENU, TACTICS, CUSTOM_TACTICS), let game manager handle ESC
                         self.game_manager.handle_keypress(event.key)
                 
+                elif event.key == pygame.K_UP or event.key == pygame.K_w:
+                    if self.game_manager.game_state == GAME_STATE_PAUSED:
+                        if self._can_repeat_pause_key('navigation'):
+                            self.pause_menu_index = (self.pause_menu_index - 1) % 3
+                            self._update_pause_key_repeat_time('navigation')
+                    else:
+                        self.game_manager.handle_keypress(event.key)
+                        
+                elif event.key == pygame.K_DOWN or event.key == pygame.K_s:
+                    if self.game_manager.game_state == GAME_STATE_PAUSED:
+                        if self._can_repeat_pause_key('navigation'):
+                            self.pause_menu_index = (self.pause_menu_index + 1) % 3
+                            self._update_pause_key_repeat_time('navigation')
+                    else:
+                        self.game_manager.handle_keypress(event.key)
+                        
+                elif event.key == pygame.K_LEFT or event.key == pygame.K_a:
+                    if self.game_manager.game_state == GAME_STATE_PAUSED:
+                        # All menu items are volume controls now
+                        if self._can_repeat_pause_key('value_change'):
+                            self._adjust_pause_volume(-0.01)  # Fine increment like main menu
+                            self._update_pause_key_repeat_time('value_change')
+                    else:
+                        self.game_manager.handle_keypress(event.key)
+                        
+                elif event.key == pygame.K_RIGHT or event.key == pygame.K_d:
+                    if self.game_manager.game_state == GAME_STATE_PAUSED:
+                        # All menu items are volume controls now
+                        if self._can_repeat_pause_key('value_change'):
+                            self._adjust_pause_volume(0.01)  # Fine increment like main menu
+                            self._update_pause_key_repeat_time('value_change')
+                    else:
+                        self.game_manager.handle_keypress(event.key)
+                        
+                elif event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
+                    if self.game_manager.game_state == GAME_STATE_PAUSED:
+                        # Save current configuration before resuming
+                        self._save_pause_config()
+                        # Resume game - Stop pause audio and resume game
+                        try:
+                            self.game_manager.sounds.stop_pause_audio()
+                            self.game_manager.sounds.resume_all_sounds()
+                        except Exception:
+                            pass
+                        self.game_manager.end_pause_timing()
+                        self.game_manager.game_state = GAME_STATE_PLAYING
+                        self.game_manager.update_music()
+                    else:
+                        self.game_manager.handle_keypress(event.key)
+                        
                 elif event.key == pygame.K_r:
                     if self.game_manager.game_state == GAME_STATE_GAME_OVER:
                         self.game_manager.restart_game()
                     else:
-                        # For other states, let game manager handle R key
                         self.game_manager.handle_keypress(event.key)
                 
                 # Game-specific controls
                 else:
+                    # During pause, don't pass keys to game manager (handled above)
+                    if self.game_manager.game_state == GAME_STATE_PAUSED:
+                        pass  # Already handled by specific key handlers above
                     # During coin flip, any key skips the animation or result display
-                    if self.game_manager.game_state == GAME_STATE_COIN_FLIP:
+                    elif self.game_manager.game_state == GAME_STATE_COIN_FLIP:
                         if self.game_manager.coin_flip_active:
                             self.game_manager.complete_coin_flip()
                         elif self.game_manager.coin_flip_winner_determined:
@@ -176,9 +296,16 @@ class MiniFootballGame:
         if not self.game_manager._music_initialized:
             self.game_manager.update_music()
             self.game_manager._music_initialized = True
-            
-        # Always update the game manager (it handles state internally)
-        self.game_manager.update()
+        
+        # Only update game logic if not paused
+        if self.game_manager.game_state != GAME_STATE_PAUSED:
+            self.game_manager.update()
+        else:
+            # Ensure pause audio keeps playing during pause
+            try:
+                self.game_manager.sounds.ensure_pause_audio_playing()
+            except Exception:
+                pass
     
     def draw(self):
         """Draw everything to the screen"""
@@ -187,6 +314,10 @@ class MiniFootballGame:
         
         # Draw game
         self.game_manager.draw(self.screen)
+        
+        # Draw pause overlay if paused
+        if self.game_manager.game_state == GAME_STATE_PAUSED:
+            self.draw_pause_overlay()
         
         # Update display
         pygame.display.flip()
@@ -236,56 +367,63 @@ class MiniFootballGame:
                 pass
     
     def draw_pause_overlay(self):
-        """Draw pause overlay with optimized GIF animation"""
+        """Draw pause overlay with volume controls"""
         # Semi-transparent overlay
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
         overlay.set_alpha(128)
         overlay.fill((0, 170, 250))
         self.screen.blit(overlay, (0, 0))
         
-        # Calculate total height needed for centering the entire complex
+        # Fonts
         font = pygame.font.Font(None, 72)
-        small_font = pygame.font.Font(None, 36)
+        item_font = pygame.font.Font(None, 36)
+        small_font = pygame.font.Font(None, 28)
         
+        # PAUSED title
         pause_text = font.render("PAUSED", True, WHITE)
-        instruction_text = small_font.render("Press ESC to resume", True, WHITE)
-        
-        # Calculate total complex height
-        total_height = pause_text.get_height()  # PAUSED text
-        total_height += 20  # Gap between PAUSED and instructions
-        total_height += instruction_text.get_height()  # Instructions text
-        
-        # Add GIF height if available
-        gif_height = 0
-        if self.pause_frames and self.pause_frame_durations:
-            gif_height = self.pause_frames[0].get_height()
-            total_height += 30  # Gap between instructions and GIF
-            total_height += gif_height
-        
-        # Calculate starting Y position to center the entire complex
-        start_y = (SCREEN_HEIGHT - total_height) // 2
-        
-        # Draw PAUSED text
-        pause_rect = pause_text.get_rect(center=(SCREEN_WIDTH // 2, start_y + pause_text.get_height() // 2))
+        pause_rect = pause_text.get_rect(center=(SCREEN_WIDTH // 2, 120))
         self.screen.blit(pause_text, pause_rect)
         
-        # Draw instructions
-        instruction_y = pause_rect.bottom + 20
-        instruction_rect = instruction_text.get_rect(center=(SCREEN_WIDTH // 2, instruction_y + instruction_text.get_height() // 2))
+        # Notify for resume
+        instruction_text = small_font.render("Press Esc to resume", True, WHITE)
+        instruction_rect = instruction_text.get_rect(center=(SCREEN_WIDTH // 2, 160))
         self.screen.blit(instruction_text, instruction_rect)
-
-        # Draw optimized animated GIF if available
+        
+        # Menu items
+        menu_items = [
+            f"Master Volume: {int(self.game_manager.master_volume * 100)}%",
+            f"SFX Volume: {int(self.game_manager.sfx_volume * 100)}%", 
+            f"BGM Volume: {int(self.game_manager.bgm_volume * 100)}%"
+        ]
+        
+        start_y = 220
+        gap = 45
+        
+        for i, item in enumerate(menu_items):
+            color = YELLOW if i == self.pause_menu_index else WHITE
+            text = item_font.render(item, True, color)
+            text_rect = text.get_rect(center=(SCREEN_WIDTH // 2, start_y + i * gap))
+            self.screen.blit(text, text_rect)
+            
+            # Add selection indicator
+            if i == self.pause_menu_index:
+                indicator = item_font.render(">", True, YELLOW)
+                indicator_rect = indicator.get_rect(right=text_rect.left - 20, centery=text_rect.centery)
+                self.screen.blit(indicator, indicator_rect)
+        
+        # Draw animated GIF if available
         if self.pause_frames and self.pause_frame_durations:
             now = pygame.time.get_ticks()
-            # Advance frame based on duration while paused
             if now - self.pause_last_tick >= self.pause_frame_durations[self.pause_frame_index]:
                 self.pause_last_tick = now
                 self.pause_frame_index = (self.pause_frame_index + 1) % len(self.pause_frames)
 
             frame = self.pause_frames[self.pause_frame_index]
-            # Center the GIF below the instructions
-            gif_y = instruction_rect.bottom + 30
+            gif_y = start_y + len(menu_items) * gap + 30
             fx = (SCREEN_WIDTH - frame.get_width()) // 2
+            fy = gif_y
+            if fy + frame.get_height() <= SCREEN_HEIGHT:
+                self.screen.blit(frame, (fx, fy))
             self.screen.blit(frame, (fx, gif_y))
     
     def run(self):        
@@ -293,12 +431,7 @@ class MiniFootballGame:
             # Handle events
             self.handle_events()
             
-            # Check if we need to enter pause loop
-            if self.game_manager.game_state == GAME_STATE_PAUSED:
-                self.pause_loop()
-                continue
-            
-            # Update
+            # Update (game manager handles pause state internally)
             self.update()
             
             # Draw

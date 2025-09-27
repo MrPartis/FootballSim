@@ -1,11 +1,8 @@
 """
 Unified Resource Manager for Mini Football Game
 
-This module provides a centralized, optimized way to handle asset loading that works
-in both development (Python) and production (PyInstaller .exe) environments.
-
-Combines the simplicity of simple_resource_manager with the advanced features
-of the original resource_manager.
+This module provides a centralized, optimized way to handle asset loading
+for development environments.
 """
 
 import os
@@ -15,17 +12,12 @@ from typing import Optional, List
 
 def _get_base_path() -> Path:
     """
-    Get the base path for resources - works in both dev and PyInstaller.
+    Get the base path for resources in development mode.
     
     Returns:
-        Path object pointing to the application base directory
+        Path object pointing to the application directory
     """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        return Path(getattr(sys, '_MEIPASS', ''))
-    except (AttributeError, TypeError):
-        # Running in development mode
-        return Path(__file__).parent.absolute()
+    return Path(__file__).parent.absolute()
 
 def get_asset_path(filename: str) -> str:
     """
@@ -106,14 +98,7 @@ def list_assets() -> List[str]:
     
     return [f.name for f in assets_path.iterdir() if f.is_file()]
 
-def is_frozen() -> bool:
-    """
-    Check if running as PyInstaller executable.
-    
-    Returns:
-        True if running as .exe, False if running from Python
-    """
-    return hasattr(sys, '_MEIPASS')
+
 
 def get_assets_dir() -> str:
     """
@@ -136,7 +121,6 @@ def debug_info() -> dict:
     assets_path = base_path / "assets"
     
     return {
-        "is_frozen": is_frozen(),
         "base_path": str(base_path),
         "assets_path": str(assets_path),
         "assets_exists": assets_path.exists(),

@@ -1,33 +1,25 @@
 """
 Optimized Configuration Manager for Mini Football Game
 
-This module handles all configuration saving/loading operations
-with support for both development and PyInstaller environments.
+This module handles all configuration saving/loading operations.
 """
 
 import os
 import json
-import sys
 from pathlib import Path
 from typing import Dict, Any, Optional
 from resource_manager import _get_base_path
 
 class ConfigManager:
-    """Manages game configuration with support for PyInstaller environments."""
+    """Manages game configuration."""
     
     def __init__(self):
         self._config_file = "game_config.json"
         self._base_path = _get_base_path()
-        self._is_frozen = hasattr(sys, '_MEIPASS')
         self._config_data = {}
         
-        # Initialize configuration paths
-        if self._is_frozen:
-            # In PyInstaller, save to user's documents or temp directory
-            self._config_dir = Path.home() / "Documents" / "MiniFootball"
-        else:
-            # In development, save next to the executable
-            self._config_dir = self._base_path
+        # Save configuration in the same directory as the game
+        self._config_dir = self._base_path
             
         self._config_path = self._config_dir / self._config_file
         
