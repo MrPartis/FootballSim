@@ -64,8 +64,14 @@ COLLISION_DAMPING = 0.985  # Universal collision damping
 # Advanced physics solver
 POSITION_CORRECTION_PERCENT = 0.8  # Increased for better separation
 POSITION_CORRECTION_SLOP = 0.1  # Reduced to apply correction more aggressively
-PHYSICS_SOLVER_ITERATIONS = 5
-MAX_VELOCITY = 400.0  # Reduced from 800 to prevent noclipping
+PHYSICS_SOLVER_ITERATIONS = 8  # Increased for better collision resolution
+MAX_VELOCITY = 300.0  # Further reduced to prevent noclipping
+
+# Continuous Collision Detection (CCD) settings
+ENABLE_CCD = True
+CCD_MAX_SUBDIVISIONS = 5  # Maximum movement subdivisions
+CCD_MIN_STEP_SIZE = 2.0  # Minimum step size for CCD (pixels)
+CCD_VELOCITY_THRESHOLD = 80.0  # Velocity above which CCD activates
 
 # Team colors
 TEAM1_COLOR = BLUE

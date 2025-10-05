@@ -1,7 +1,7 @@
 import pygame
 import math
 from constants import *
-from physics_utils import clamp_velocity, apply_corner_repulsion
+from physics_utils import clamp_velocity, apply_corner_repulsion, adaptive_movement_with_ccd
 
 
 class Ball:
@@ -61,12 +61,23 @@ class Ball:
         # Clamp velocity FIRST to prevent excessive speeds
         clamp_velocity(self)
         
-        # Store previous position for collision rollback if needed
+        # Store previous position for rollback if needed
         prev_x, prev_y = self.x, self.y
         
-        # Apply movement with speed multiplier using clamped velocity
+        # Calculate target position
         new_x = self.x + self.vx * speed_multiplier
         new_y = self.y + self.vy * speed_multiplier
+        
+        # Use CCD if velocity is high enough
+        velocity_magnitude = math.sqrt(self.vx * self.vx + self.vy * self.vy)
+        
+        if ENABLE_CCD and velocity_magnitude > CCD_VELOCITY_THRESHOLD:
+            # Use CCD for high-speed movement (pass empty list since ball boundary checks are separate)
+            adaptive_movement_with_ccd(self, new_x, new_y, [])
+        else:
+            # Use direct movement for low speeds
+            self.x = new_x
+            self.y = new_y
         
         # Check if new position would cause boundary collision
         goal_y_min = FIELD_Y + (FIELD_HEIGHT - GOAL_WIDTH) // 2

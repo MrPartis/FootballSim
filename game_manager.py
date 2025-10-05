@@ -6,7 +6,7 @@ import os
 from constants import *
 from player import Player
 from ball import Ball
-from physics_utils import resolve_circle_circle
+from physics_utils import resolve_circle_circle, enhanced_separation_enforcement, adaptive_movement_with_ccd, swept_circle_collision
 from field import Field
 from sound_manager import SoundManager
 from tactics import TacticsManager, CustomTacticsEditor
@@ -817,15 +817,32 @@ class GameManager:
                     if dx*dx + dy*dy <= max_collision_dist*max_collision_dist:
                         collision_pairs.append((p1, p2))
             
-            for _ in range(PHYSICS_SOLVER_ITERATIONS):
+            # Dynamic solver iterations based on velocities
+            max_velocity = max((math.sqrt(p.vx**2 + p.vy**2) for p in all_players), default=0)
+            solver_iterations = PHYSICS_SOLVER_ITERATIONS
+            if max_velocity > 200:
+                solver_iterations *= 3
+            elif max_velocity > 100:
+                solver_iterations *= 2
+            
+            for iteration in range(solver_iterations):
+                resolved_any = False
                 for p1, p2 in collision_pairs:
                     if resolve_circle_circle(p1, p2):
+                        resolved_any = True
+                        # Enhanced separation enforcement for overlapping objects
+                        enhanced_separation_enforcement(p1, p2)
+                        
                         # Efficient collision tracking with size limit
                         pair_id = (min(id(p1), id(p2)), max(id(p1), id(p2)))
                         if len(self.active_collisions) < 20:  # Limit collision tracking
                             if pair_id not in self.active_collisions:
                                 self.active_collisions.add(pair_id)
                                 self.sounds.play_collision()
+                
+                # Early exit if no collisions resolved in this iteration
+                if not resolved_any:
+                    break
         
             # Update ball physics FIRST (with boundary checking)
             self.ball.update(speed_multiplier)
@@ -840,43 +857,58 @@ class GameManager:
                 if dx*dx + dy*dy <= max_ball_collision_dist*max_ball_collision_dist:
                     nearby_players.append(p)
             
-            # Increased iterations for ball-player collisions to prevent noclipping
-            for iteration in range(PHYSICS_SOLVER_ITERATIONS * 2):  # Double iterations for ball
+            # Enhanced ball-player collision with CCD and dynamic iterations
+            ball_velocity = math.sqrt(self.ball.vx**2 + self.ball.vy**2)
+            ball_iterations = PHYSICS_SOLVER_ITERATIONS * 2
+            if ball_velocity > 200:
+                ball_iterations *= 2  # Extra iterations for high-speed ball
+            
+            for iteration in range(ball_iterations):
                 collision_resolved = False
+                
                 for p in nearby_players:
                     # Skip collision resolution if ball has kick immunity against this player
                     if self.ball.has_kick_immunity(id(p)):
                         continue
-                        
-                    if resolve_circle_circle(self.ball, p):
-                        collision_resolved = True
+                    
+                    # Use swept collision detection for high-speed scenarios
+                    if ball_velocity > CCD_VELOCITY_THRESHOLD:
+                        impact_time = swept_circle_collision(self.ball, p, 1.0)
+                        if impact_time is not None and impact_time < 0.5:  # Collision imminent
+                            # Pre-emptive collision response
+                            if resolve_circle_circle(self.ball, p):
+                                collision_resolved = True
+                                enhanced_separation_enforcement(self.ball, p)
+                    else:
+                        # Standard collision resolution for low speeds
+                        if resolve_circle_circle(self.ball, p):
+                            collision_resolved = True
+                            enhanced_separation_enforcement(self.ball, p)
+                    
+                    if collision_resolved:
                         # Optimized collision tracking with size limit
-                        if len(self.active_collisions) < 20:  # Limit collision tracking for memory
+                        if len(self.active_collisions) < 20:
                             pair_id = (id(self.ball), id(p))
                             if pair_id not in self.active_collisions:
                                 self.active_collisions.add(pair_id)
                                 self.sounds.play_collision()
-                        
-                        # Additional safety: ensure ball doesn't clip through player
-                        dx = self.ball.x - p.x
-                        dy = self.ball.y - p.y
-                        dist = math.sqrt(dx*dx + dy*dy)
-                        min_dist = self.ball.radius + p.radius
-                        
-                        if dist < min_dist and dist > 0:
-                            # Force minimum separation
-                            overlap = min_dist - dist
-                            nx = dx / dist
-                            ny = dy / dist
-                            # Move ball away from player
-                            self.ball.x += nx * overlap * 0.6  # Ball takes more correction
-                            p.x -= nx * overlap * 0.4  # Player takes less correction
-                            self.ball.y += ny * overlap * 0.6
-                            p.y -= ny * overlap * 0.4
+                        break  # Handle one collision per iteration
+                
+                # Early exit if no collisions in this iteration
+                if not collision_resolved:
+                    break
                 
                 # If no collisions in this iteration, we can break early
                 if not collision_resolved:
                     break
+            
+            # Final safety pass: enforce separation for any remaining overlaps
+            for p in nearby_players:
+                enhanced_separation_enforcement(self.ball, p)
+            
+            for i, p1 in enumerate(all_players):
+                for p2 in all_players[i+1:]:
+                    enhanced_separation_enforcement(p1, p2)
         
             # Clean up collision tracking - remove pairs that are no longer colliding
             self._cleanup_collision_tracking(all_players)
