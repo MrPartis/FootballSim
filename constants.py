@@ -24,11 +24,6 @@ LIME = (0, 255, 0)
 LEMON = (255, 255, 0)
 DIFFICULTY_RED = (255, 0, 0)
 DARK_RED = (127, 0, 0)
-
-# UI Colors for better contrast
-MENU_TEXT_COLOR = (240, 240, 240)  # Light gray, better than pure white for contrast
-MENU_TEXT_COLOR = (240, 240, 240)  # Light gray, better than pure white for contrast
-
 # UI Colors for better contrast
 MENU_TEXT_COLOR = (240, 240, 240)  # Light gray, better than pure white for contrast
 
@@ -69,9 +64,9 @@ MAX_VELOCITY = 300.0  # Further reduced to prevent noclipping
 
 # Continuous Collision Detection (CCD) settings
 ENABLE_CCD = True
-CCD_MAX_SUBDIVISIONS = 5  # Maximum movement subdivisions
-CCD_MIN_STEP_SIZE = 2.0  # Minimum step size for CCD (pixels)
-CCD_VELOCITY_THRESHOLD = 80.0  # Velocity above which CCD activates
+CCD_MAX_SUBDIVISIONS = 10  # Maximum movement subdivisions
+CCD_MIN_STEP_SIZE = 0.5  # Minimum step size for CCD (pixels)
+CCD_VELOCITY_THRESHOLD = 75.0  # Velocity above which CCD activates
 
 # Team colors
 TEAM1_COLOR = BLUE
@@ -117,7 +112,7 @@ P2_CONTROLS = {
     'left': pygame.K_LEFT,
     'right': pygame.K_RIGHT,
     'select_players': [pygame.K_KP1, pygame.K_KP2, pygame.K_KP3, pygame.K_KP4, pygame.K_KP5],
-    'action': pygame.K_RETURN
+    'action': pygame.K_KP_ENTER
 }
 
 # Game states
@@ -170,7 +165,7 @@ BOT_THINK_MS = {
 
 # Aim jitter magnitude by difficulty (higher = sloppier aim)
 BOT_AIM_JITTER = {
-    "easy": 18.0,
+    "easy": 15.0,
     "medium": 10.0,
     "hard": 5.0,
     "insane": 2.0,
@@ -179,20 +174,20 @@ BOT_AIM_JITTER = {
 
 # Force noise ratio by difficulty (multiplicative +/- noise)
 BOT_FORCE_NOISE = {
-    "easy": 0.30,
-    "medium": 0.18,
+    "easy": 0.20,
+    "medium": 0.15,
     "hard": 0.10,
     "insane": 0.05,
-    "extreme": 0.02,
+    "extreme": 0.01,
 }
 
 # Baseline risk-taking (0=very safe, 1=very risky)
 BOT_BASE_RISK = {
-    "easy": 0.25,
-    "medium": 0.50,
-    "hard": 0.75,
-    "insane": 0.90,
-    "extreme": 0.98,
+    "easy": 0.3,
+    "medium": 0.55,
+    "hard": 0.8,
+    "insane": 0.9,
+    "extreme": 0.99,
 }
 
 # Difficulty colors for UI display
